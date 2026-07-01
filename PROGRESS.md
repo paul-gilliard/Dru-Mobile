@@ -48,10 +48,25 @@
   Banque d'exercices (CRUD), Banque d'aliments (CRUD), gestion des
   disponibilités, menu "Plus".
 - Réutilisation forte de la logique métier : les écrans Programme / Journal /
-  Performance / Nutrition / Objectifs sont **partagés** entre l'espace
-  athlète et l'espace coach (vue d'un athlète), via `AthleteScopeContext`.
+  Performance / Nutrition / Objectifs / Statistiques sont **partagés** entre
+  l'espace athlète et l'espace coach (vue d'un athlète), via
+  `AthleteScopeContext`.
+- Écran Statistiques (nouveau) : tonnage cumulé par groupe musculaire (30j,
+  bar chart) + courbe d'évolution du poids + courbe de tonnage total par
+  séance, via `react-native-chart-kit` / `react-native-svg`. Backend :
+  nouveaux endpoints `GET /api/stats/tonnage-by-muscle` et
+  `GET /api/stats/journal-trend`.
+- Bug corrigé : le tap pendant le scroll (pattern `onTouchEnd` sur des `View`)
+  déclenchait des sélections involontaires sur presque tous les écrans à
+  listes/chips (séances, jours, badges, onglets, menus...). Remplacé partout
+  par `Pressable`/`onPress`.
+- Bug corrigé : le log de série d'exercice (`SessionDetailScreen`) n'envoyait
+  pas `program_session_id` à la création de la performance, donc l'entrée
+  n'était pas reconnue comme "faite aujourd'hui" après enregistrement (elle
+  n'apparaissait qu'après un redémarrage de l'écran). Le lien avec la séance
+  est maintenant correctement transmis.
 - Build vérifié : `tsc --noEmit` sans erreur, bundles Metro Android **et**
-  iOS générés sans erreur (1028 modules).
+  iOS générés sans erreur.
 
 ## Comment lancer le projet
 
@@ -71,8 +86,10 @@ cette machine au moment du développement — à re-vérifier si elle change.
 
 Ces écrans web sont avancés/analytiques et n'ont pas d'équivalent mobile pour
 l'instant (l'API mobile ne les expose pas non plus) :
-- Stats coach avancées (graphiques tonnage par muscle, résumés 7/14/28 jours,
-  détail par muscle) — `coach_stats`, `coach_stats.js`.
+- Stats coach avancées complètes (résumés 7/14/28 jours détaillés, détail
+  par exercice avec séries principales/secondaires) — une version simplifiée
+  (tonnage/muscle + tendance poids) est disponible dans l'onglet
+  "Statistiques", mais pas tout le détail de `coach_stats.js`.
 - Bilan hebdomadaire coach (`coach_weekly_summary`, panneau d'attention,
   marquage hebdo).
 - Analyse croisée (`cross_analysis.js`, `weekly_compare.js`).

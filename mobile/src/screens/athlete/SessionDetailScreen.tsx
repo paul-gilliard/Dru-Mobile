@@ -84,6 +84,7 @@ export default function SessionDetailScreen() {
           key={exercise.id}
           exercise={exercise}
           athleteId={athleteId}
+          sessionId={session.id}
           readOnly={readOnly}
           isCoach={isCoach}
           todayEntries={todayEntries.filter((e) => e.exercise === exercise.name)}
@@ -152,9 +153,9 @@ function AddExerciseForm({ sessionId, onAdded }: { sessionId: number; onAdded: (
 }
 
 function ExerciseCard({
-  exercise, athleteId, readOnly, isCoach, todayEntries, onLogged, onDeleted,
+  exercise, athleteId, sessionId, readOnly, isCoach, todayEntries, onLogged, onDeleted,
 }: {
-  exercise: ExerciseEntryDTO; athleteId: number; readOnly: boolean; isCoach: boolean;
+  exercise: ExerciseEntryDTO; athleteId: number; sessionId: number; readOnly: boolean; isCoach: boolean;
   todayEntries: PerformanceEntryDTO[]; onLogged: () => void; onDeleted: () => void;
 }) {
   const [lastEntries, setLastEntries] = useState<PerformanceEntryDTO[]>([]);
@@ -179,6 +180,7 @@ function ExerciseCard({
     try {
       await createPerformance({
         athlete_id: athleteId,
+        program_session_id: sessionId,
         exercise: exercise.name,
         series_number: seriesNumber,
         reps: v.reps ? parseFloat(v.reps.replace(',', '.')) : undefined,
