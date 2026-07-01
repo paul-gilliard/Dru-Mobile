@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import * as SecureStore from 'expo-secure-store';
+import { deleteItemAsync, getItemAsync, setItemAsync } from '../utils/secureStorage';
 import { loginRequest, meRequest } from '../api/auth';
 import { apiErrorMessage, TOKEN_KEY } from '../api/client';
 import { UserDTO } from '../api/types';
@@ -25,13 +25,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const token = await SecureStore.getItemAsync(TOKEN_KEY);
+        const token = await getItemAsync(TOKEN_KEY);
         if (token) {
           const me = await meRequest();
           setUser(me);
         }
       } catch {
-        await SecureStore.deleteItemAsync(TOKEN_KEY);
+        try {
+          await deleteItemAsync(TOKEN_KEY);
+        } catch {
+          // Le stockage sécurisé n'est pas pleinement supporté sur web ; on ignore.
+        }
       } finally {
         setIsLoading(false);
       }
@@ -43,7 +47,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setError(null);
     try {
       const { token, user: loggedInUser } = await loginRequest(username, password);
-      await SecureStore.setItemAsync(TOKEN_KEY, token);
+      await setItemAsync(TOKEN_KEY, token);
       setUser(loggedInUser);
     } catch (err) {
       setError(apiErrorMessage(err, 'Connexion impossible'));
@@ -54,7 +58,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
-    await SecureStore.deleteItemAsync(TOKEN_KEY);
+    try {
+      await deleteItemAsync(TOKEN_KEY);
+    } catch {
+      // Idem : ignoré si la plateforme (ex: web) ne supporte pas la suppression.
+    }
     setUser(null);
   }, []);
 

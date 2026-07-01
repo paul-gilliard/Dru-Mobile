@@ -1,5 +1,5 @@
 import axios from 'axios';
-import * as SecureStore from 'expo-secure-store';
+import { getItemAsync } from '../utils/secureStorage';
 import { API_URL } from './config';
 
 export const TOKEN_KEY = 'dru_mobile_token';
@@ -10,10 +10,14 @@ export const apiClient = axios.create({
 });
 
 apiClient.interceptors.request.use(async (config) => {
-  const token = await SecureStore.getItemAsync(TOKEN_KEY);
-  if (token) {
-    config.headers = config.headers ?? {};
-    config.headers.Authorization = `Bearer ${token}`;
+  try {
+    const token = await getItemAsync(TOKEN_KEY);
+    if (token) {
+      config.headers = config.headers ?? {};
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  } catch {
+    // Le stockage n'est pas disponible (ex: web sans polyfill) : on part sans token.
   }
   return config;
 });

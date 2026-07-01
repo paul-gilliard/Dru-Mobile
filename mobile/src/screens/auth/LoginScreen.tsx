@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../context/AuthContext';
 import { Button, Input } from '../../components/ui';
-import { colors, fontSize, radius, spacing } from '../../theme';
+import { colors, fontSize, gradients, radius, shadow, spacing } from '../../theme';
 
 export default function LoginScreen() {
   const { login, isAuthenticating, error, clearError } = useAuth();
@@ -20,67 +21,75 @@ export default function LoginScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <StatusBar style="light" />
-      <View style={styles.header}>
-        <View style={styles.logoCircle}>
-          <Text style={styles.logoText}>D</Text>
+    <LinearGradient colors={gradients.hero} style={styles.gradientRoot}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <StatusBar style="light" />
+        <View style={styles.header}>
+          <LinearGradient colors={gradients.primary} style={[styles.logoCircle, shadow.glow]}>
+            <Text style={styles.logoText}>D</Text>
+          </LinearGradient>
+          <Text style={styles.title}>DRU</Text>
+          <Text style={styles.subtitle}>NO PAIN. NO GAIN. NO EXCUSES.</Text>
         </View>
-        <Text style={styles.title}>Dru</Text>
-        <Text style={styles.subtitle}>Coaching sportif & nutrition</Text>
-      </View>
 
-      <View style={styles.form}>
-        <Text style={styles.label}>Identifiant</Text>
-        <Input
-          value={username}
-          onChangeText={(t) => { setUsername(t); clearError(); }}
-          autoCapitalize="none"
-          autoCorrect={false}
-          placeholder="coach ou athlete"
-        />
+        <View style={styles.form}>
+          <Text style={styles.label}>Identifiant</Text>
+          <Input
+            value={username}
+            onChangeText={(t) => { setUsername(t); clearError(); }}
+            autoCapitalize="none"
+            autoCorrect={false}
+            placeholder="coach ou athlete"
+          />
 
-        <Text style={[styles.label, { marginTop: spacing.lg }]}>Mot de passe</Text>
-        <Input
-          value={password}
-          onChangeText={(t) => { setPassword(t); clearError(); }}
-          secureTextEntry
-          placeholder="••••••••"
-        />
+          <Text style={[styles.label, { marginTop: spacing.lg }]}>Mot de passe</Text>
+          <Input
+            value={password}
+            onChangeText={(t) => { setPassword(t); clearError(); }}
+            secureTextEntry
+            placeholder="••••••••"
+          />
 
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+          {error ? <Text style={styles.error}>{error}</Text> : null}
 
-        <Button
-          title="Se connecter"
-          onPress={handleSubmit}
-          loading={isAuthenticating}
-          disabled={!username || !password}
-          style={{ marginTop: spacing.xl }}
-        />
+          <Button
+            title="C'est parti 🔥"
+            onPress={handleSubmit}
+            loading={isAuthenticating}
+            disabled={!username || !password}
+            style={{ marginTop: spacing.xl }}
+          />
 
-        <Text style={styles.hint}>
-          Démo : coach / coach123 · athlete / athlete123
-        </Text>
-      </View>
-    </KeyboardAvoidingView>
+          <Text style={styles.hint}>
+            Démo : coach / coach123 · athlete / athlete123
+          </Text>
+        </View>
+      </KeyboardAvoidingView>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background, justifyContent: 'center', padding: spacing.xl },
+  gradientRoot: { flex: 1 },
+  container: { flex: 1, justifyContent: 'center', padding: spacing.xl },
   header: { alignItems: 'center', marginBottom: spacing.xxl },
   logoCircle: {
-    width: 72, height: 72, borderRadius: radius.lg, backgroundColor: colors.primary,
-    alignItems: 'center', justifyContent: 'center', marginBottom: spacing.md,
+    width: 84, height: 84, borderRadius: radius.xl,
+    alignItems: 'center', justifyContent: 'center', marginBottom: spacing.lg,
   },
-  logoText: { color: '#fff', fontSize: 32, fontWeight: '800' },
-  title: { color: colors.text, fontSize: 32, fontWeight: '800' },
-  subtitle: { color: colors.textMuted, fontSize: fontSize.md, marginTop: spacing.xs },
+  logoText: { color: '#fff', fontSize: 38, fontWeight: '900' },
+  title: { color: colors.text, fontSize: 42, fontWeight: '900', letterSpacing: 2 },
+  subtitle: {
+    color: colors.primary, fontSize: fontSize.xs, marginTop: spacing.sm, fontWeight: '800', letterSpacing: 1.5,
+  },
   form: {},
-  label: { color: colors.textMuted, fontSize: fontSize.sm, marginBottom: spacing.xs, fontWeight: '600' },
-  error: { color: colors.danger, marginTop: spacing.md, textAlign: 'center' },
+  label: {
+    color: colors.textMuted, fontSize: fontSize.xs, marginBottom: spacing.xs, fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 0.6,
+  },
+  error: { color: colors.danger, marginTop: spacing.md, textAlign: 'center', fontWeight: '600' },
   hint: { color: colors.textFaint, fontSize: fontSize.xs, textAlign: 'center', marginTop: spacing.lg },
 });

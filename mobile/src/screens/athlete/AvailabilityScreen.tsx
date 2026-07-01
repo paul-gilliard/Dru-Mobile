@@ -64,19 +64,20 @@ export default function AvailabilityScreen() {
       </Text>
       {Array.from(byDate.entries()).map(([date, daySlots]) => (
         <Card key={date} style={{ marginBottom: spacing.md }}>
-          <SectionTitle>{formatDateFR(date)}</SectionTitle>
+          <SectionTitle icon="🗓️">{formatDateFR(date)}</SectionTitle>
           <View style={styles.slotsRow}>
             {daySlots.map((slot) => (
               <Pressable
                 key={slot.id}
                 onPress={() => toggle(slot)}
-                style={[
+                style={({ pressed }) => [
                   styles.slot,
                   { backgroundColor: slot.available ? `${colors.success}26` : `${colors.danger}1A`, borderColor: slot.available ? colors.success : colors.border },
+                  pressed && isCoach && { opacity: 0.6, transform: [{ scale: 0.97 }] },
                 ]}
               >
                 <Text style={[styles.slotText, { color: slot.available ? colors.success : colors.textFaint }]}>
-                  {TIMESLOT_LABELS[slot.timeslot] ?? slot.timeslot}
+                  {slot.available ? '✓ ' : ''}{TIMESLOT_LABELS[slot.timeslot] ?? slot.timeslot}
                 </Text>
               </Pressable>
             ))}

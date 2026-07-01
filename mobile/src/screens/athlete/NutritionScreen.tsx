@@ -73,7 +73,7 @@ export default function NutritionScreen() {
     >
       {isCoach && (
         <Card style={{ marginBottom: spacing.lg }}>
-          <SectionTitle>Nouveau plan alimentaire</SectionTitle>
+          <SectionTitle icon="🍽️">Nouveau plan alimentaire</SectionTitle>
           <View style={styles.row}>
             <Input style={{ flex: 1 }} placeholder="Nom du plan" value={newPlanName} onChangeText={setNewPlanName} />
             <Button title="Créer" onPress={handleCreatePlan} loading={creating} disabled={!newPlanName.trim()} style={styles.createBtn} />
@@ -82,7 +82,7 @@ export default function NutritionScreen() {
       )}
 
       {plans.length === 0 ? (
-        <EmptyState title="Aucun plan alimentaire" subtitle={isCoach ? 'Crée un plan ci-dessus.' : "Ton coach n'a pas encore créé de plan."} />
+        <EmptyState icon="🍽️" title="Aucun plan alimentaire" subtitle={isCoach ? 'Crée un plan ci-dessus.' : "Ton coach n'a pas encore créé de plan."} />
       ) : (
         plans.map((plan) => (
           <MealPlanCard key={plan.id} plan={plan} isCoach={isCoach} onChanged={load} onDeletePlan={() => handleDeletePlan(plan.id)} />
@@ -101,14 +101,17 @@ function MealPlanCard({
   return (
     <Card style={{ marginBottom: spacing.lg }}>
       <View style={styles.cardHeader}>
-        <SectionTitle style={{ marginBottom: 0, flex: 1 }}>{plan.name}</SectionTitle>
+        <SectionTitle style={{ marginBottom: 0, flex: 1 }} icon="🍽️">{plan.name}</SectionTitle>
         {isCoach && <Button title="Suppr." variant="danger" onPress={onDeletePlan} style={styles.smallBtn} />}
       </View>
+      <View style={styles.kcalHero}>
+        <Text style={styles.kcalValue}>{Math.round(totals.kcals)}</Text>
+        <Text style={styles.kcalUnit}>kcal / jour</Text>
+      </View>
       <View style={styles.totalsRow}>
-        <TotalPill label="Kcal" value={Math.round(totals.kcals)} color={colors.warning} />
-        <TotalPill label="Prot" value={Math.round(totals.proteins)} color={colors.primary} unit="g" />
-        <TotalPill label="Gluc" value={Math.round(totals.carbs)} color={colors.success} unit="g" />
-        <TotalPill label="Lip" value={Math.round(totals.lipids)} color={colors.danger} unit="g" />
+        <TotalPill label="Protéines" value={Math.round(totals.proteins)} color={colors.secondary} unit="g" />
+        <TotalPill label="Glucides" value={Math.round(totals.carbs)} color={colors.success} unit="g" />
+        <TotalPill label="Lipides" value={Math.round(totals.lipids)} color={colors.gold} unit="g" />
       </View>
 
       {Array.from({ length: plan.meal_count }, (_, i) => i + 1).map((mealNumber) => {
@@ -197,7 +200,7 @@ function FoodPicker({ onPick, onCancel }: { onPick: (food: FoodDTO, quantity: nu
 
 function TotalPill({ label, value, color, unit }: { label: string; value: number; color: string; unit?: string }) {
   return (
-    <View style={[styles.pill, { borderColor: color }]}>
+    <View style={[styles.pill, { backgroundColor: `${color}1F`, borderColor: `${color}55` }]}>
       <Text style={[styles.pillValue, { color }]}>{value}{unit ?? ''}</Text>
       <Text style={styles.pillLabel}>{label}</Text>
     </View>
@@ -211,12 +214,15 @@ const styles = StyleSheet.create({
   createBtn: { paddingHorizontal: spacing.lg },
   cardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.xs },
   smallBtn: { paddingVertical: spacing.xs, paddingHorizontal: spacing.sm },
+  kcalHero: { alignItems: 'center', marginBottom: spacing.md },
+  kcalValue: { color: colors.text, fontSize: 40, fontWeight: '900' },
+  kcalUnit: { color: colors.textMuted, fontSize: fontSize.xs, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
   totalsRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
   pill: {
-    flex: 1, borderWidth: 1, borderRadius: 12, paddingVertical: spacing.sm, alignItems: 'center',
+    flex: 1, borderWidth: 1, borderRadius: 14, paddingVertical: spacing.sm, alignItems: 'center',
   },
-  pillValue: { fontWeight: '800', fontSize: fontSize.md },
-  pillLabel: { color: colors.textMuted, fontSize: fontSize.xs },
+  pillValue: { fontWeight: '900', fontSize: fontSize.md },
+  pillLabel: { color: colors.textMuted, fontSize: fontSize.xs, fontWeight: '700', marginTop: 2 },
   mealBlock: { marginTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm },
   mealTitle: { color: colors.text, fontWeight: '700', marginBottom: spacing.xs },
   foodRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 2 },

@@ -67,6 +67,53 @@
   est maintenant correctement transmis.
 - Build vérifié : `tsc --noEmit` sans erreur, bundles Metro Android **et**
   iOS générés sans erreur.
+- **Refonte visuelle complète "salle de muscu intense"** (thème sombre +
+  accents orange/rouge vifs, gradients, gros chiffres) :
+  - Nouveau thème (`theme.ts`) : palette recentrée sur un fond quasi-noir,
+    un orange/rouge énergique en couleur primaire, un vert/or pour les
+    succès/records, ajout de `gradients` (primary, fire, hero, cool,
+    success) et de `shadow.glow` pour les effets lumineux.
+  - Kit UI (`components/ui.tsx`) repensé : boutons avec gradient + texte
+    majuscule, cartes avec effet "glow" optionnel, `SectionTitle` avec
+    barre d'accent, `Badge` plus contrasté, nouveaux composants
+    `GradientCard`, `StatBlock`, `Divider`.
+  - Écran de connexion : fond en dégradé, logo avec gradient, slogan
+    "NO PAIN. NO GAIN. NO EXCUSES.".
+  - Accueil athlète : carte "séance du jour" en gradient avec CTA,
+    stats du jour, section objectifs/journal/programme.
+  - Séance (log de performance) : barre de progression de la séance,
+    détection automatique de record personnel (badge "🏆 PR"), bouton de
+    validation de série en gradient vert.
+  - Programme : mise en évidence de la séance du jour (bandeau + badge
+    "AUJOURD'HUI").
+  - Statistiques : cartes de résumé (tonnage 30j, delta de poids), muscle
+    dominant mis en avant, graphiques recolorés en orange.
+  - Journal : bandeau de série (streak) de jours consécutifs remplis,
+    champs avec icônes.
+  - Nutrition : gros chiffre de calories/jour, macros en pastilles
+    colorées (protéines/glucides/lipides).
+  - Dashboard coach : avatars en gradient, statistiques d'équipe, pastille
+    "actif aujourd'hui".
+  - Tous les écrans "Plus" (athlète/coach) : carte de profil avec avatar
+    en gradient.
+  - Bug corrigé (post-tests navigateur) : sur web, `expo-secure-store`
+    n'est pas supporté, ce qui faisait échouer silencieusement **toutes**
+    les requêtes API (y compris la connexion) via l'intercepteur Axios.
+    Ajout d'un wrapper `utils/secureStorage.ts` qui bascule automatiquement
+    sur `AsyncStorage` en environnement web et garde `expo-secure-store`
+    sur iOS/Android.
+  - Bug corrigé : plusieurs instances du backend Flask tournaient
+    simultanément sur le port 5001 (conflit de port), causant des échecs
+    de connexion aléatoires pendant les tests. Une seule instance propre
+    est maintenant utilisée.
+  - Testé via un navigateur (preview web Expo) sur l'intégralité du
+    parcours coach et athlète (connexion, dashboard, les 6 onglets du
+    détail athlète, banques d'exercices/aliments, disponibilités, profil,
+    accueil athlète, programme) : aucune erreur JS, note visuelle globale
+    9/10. Ajustements de contraste/espacement appliqués suite à ce retour
+    (placeholders plus lisibles, badges plus contrastés, onglets moins
+    serrés, feedback de pression sur les créneaux de disponibilité, champ
+    description d'objectif non tronqué).
 
 ## Comment lancer le projet
 

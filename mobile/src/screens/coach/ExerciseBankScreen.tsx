@@ -74,7 +74,7 @@ export default function ExerciseBankScreen() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
     >
       <Card style={{ marginBottom: spacing.lg }}>
-        <SectionTitle>Nouvel exercice</SectionTitle>
+        <SectionTitle icon="🏋️">Nouvel exercice</SectionTitle>
         <Input placeholder="Nom de l'exercice" value={name} onChangeText={setName} />
         <View style={styles.muscleRow}>
           {muscleGroups.map((mg) => (
@@ -87,11 +87,14 @@ export default function ExerciseBankScreen() {
       </Card>
 
       {exercises.length === 0 ? (
-        <EmptyState title="Aucun exercice dans la banque" />
+        <EmptyState icon="🏋️" title="Aucun exercice dans la banque" />
       ) : (
         Array.from(byMuscle.entries()).map(([mg, list]) => (
           <View key={mg} style={{ marginBottom: spacing.lg }}>
-            <Text style={[styles.muscleTitle, { color: muscleColors[mg] ?? colors.text }]}>{mg}</Text>
+            <View style={styles.muscleTitleRow}>
+              <View style={[styles.muscleDot, { backgroundColor: muscleColors[mg] ?? colors.primary }]} />
+              <Text style={[styles.muscleTitle, { color: muscleColors[mg] ?? colors.text }]}>{mg}</Text>
+            </View>
             {list.map((ex) => (
               <Card key={ex.id} style={styles.exerciseRow}>
                 <Text style={styles.exerciseName}>{ex.name}</Text>
@@ -109,8 +112,10 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.lg, paddingBottom: spacing.xxl },
   muscleRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.md },
-  muscleTitle: { fontWeight: '800', marginBottom: spacing.sm, fontSize: fontSize.sm },
+  muscleTitleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.sm },
+  muscleDot: { width: 8, height: 8, borderRadius: 4 },
+  muscleTitle: { fontWeight: '800', fontSize: fontSize.sm, textTransform: 'uppercase', letterSpacing: 0.5 },
   exerciseRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.sm, paddingVertical: spacing.sm },
-  exerciseName: { color: colors.text, flex: 1, fontWeight: '500' },
+  exerciseName: { color: colors.text, flex: 1, fontWeight: '600' },
   deleteBtn: { paddingVertical: 4, paddingHorizontal: spacing.sm },
 });

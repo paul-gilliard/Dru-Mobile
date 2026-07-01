@@ -71,7 +71,7 @@ function MoreStack() {
 }
 
 function TabIcon({ emoji }: { emoji: string }) {
-  return <Text style={{ fontSize: 18 }}>{emoji}</Text>;
+  return <Text style={{ fontSize: 20 }}>{emoji}</Text>;
 }
 
 export default function CoachNavigator() {
@@ -81,7 +81,8 @@ export default function CoachNavigator() {
         headerShown: false,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textFaint,
-        tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border },
+        tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border, height: 66, paddingTop: 6, paddingBottom: 10 },
+        tabBarLabelStyle: { fontWeight: '700', fontSize: 11 },
       }}
     >
       <Tab.Screen name="DashboardTab" component={DashboardStack} options={{ title: 'Athlètes', tabBarIcon: () => <TabIcon emoji="👥" /> }} />

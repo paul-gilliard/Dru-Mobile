@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { RouteProp, useRoute } from '@react-navigation/native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../context/AuthContext';
 import {
   addExerciseEntry, createPerformance, deleteExerciseEntry, getProgram,
@@ -8,8 +9,8 @@ import {
 } from '../../api/resources';
 import { apiErrorMessage } from '../../api/client';
 import { ExerciseEntryDTO, PerformanceEntryDTO, ProgramSessionDTO } from '../../api/types';
-import { Badge, Button, Card, ErrorView, Input, LoadingView, SectionTitle } from '../../components/ui';
-import { colors, fontSize, muscleColors, spacing } from '../../theme';
+import { Badge, Button, Card, ErrorView, Input, LoadingView, ProgressBar, SectionTitle } from '../../components/ui';
+import { colors, fontSize, gradients, muscleColors, radius, shadow, spacing } from '../../theme';
 import { AthleteStackParamList } from '../../navigation/types';
 import { todayISO } from '../../utils/format';
 
@@ -76,12 +77,24 @@ export default function SessionDetailScreen() {
     }
   };
 
+  const totalSeries = session.exercises.reduce((acc, ex) => acc + (ex.series.length || ex.sets || 3), 0);
+  const doneSeries = todayEntries.length;
+  const progress = totalSeries > 0 ? Math.min(1, doneSeries / totalSeries) : 0;
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>{session.session_name}</Text>
-      {session.exercises.map((exercise) => (
+      <View style={styles.header}>
+        <Text style={styles.title}>{session.session_name}</Text>
+        <Text style={styles.subtitle}>
+          {session.exercises.length} exercice{session.exercises.length > 1 ? 's' : ''} · {doneSeries}/{totalSeries} séries loggées
+        </Text>
+        <ProgressBar value={progress} color={progress >= 1 ? colors.success : colors.primary} />
+      </View>
+
+      {session.exercises.map((exercise, idx) => (
         <ExerciseCard
           key={exercise.id}
+          index={idx + 1}
           exercise={exercise}
           athleteId={athleteId}
           sessionId={session.id}
@@ -128,7 +141,7 @@ function AddExerciseForm({ sessionId, onAdded }: { sessionId: number; onAdded: (
 
   return (
     <Card style={{ marginBottom: spacing.lg }}>
-      <SectionTitle>+ Ajouter un exercice</SectionTitle>
+      <SectionTitle icon="➕">Ajouter un exercice</SectionTitle>
       <Input placeholder="Nom de l'exercice" value={name} onChangeText={setName} />
       {bankNames.length > 0 && (
         <View style={styles.suggestionRow}>
@@ -153,14 +166,15 @@ function AddExerciseForm({ sessionId, onAdded }: { sessionId: number; onAdded: (
 }
 
 function ExerciseCard({
-  exercise, athleteId, sessionId, readOnly, isCoach, todayEntries, onLogged, onDeleted,
+  exercise, index, athleteId, sessionId, readOnly, isCoach, todayEntries, onLogged, onDeleted,
 }: {
-  exercise: ExerciseEntryDTO; athleteId: number; sessionId: number; readOnly: boolean; isCoach: boolean;
+  exercise: ExerciseEntryDTO; index: number; athleteId: number; sessionId: number; readOnly: boolean; isCoach: boolean;
   todayEntries: PerformanceEntryDTO[]; onLogged: () => void; onDeleted: () => void;
 }) {
   const [lastEntries, setLastEntries] = useState<PerformanceEntryDTO[]>([]);
   const [values, setValues] = useState<Record<number, { reps: string; load: string }>>({});
   const [savingSeries, setSavingSeries] = useState<number | null>(null);
+  const [justPR, setJustPR] = useState<number | null>(null);
 
   useEffect(() => {
     lastPerformanceForExercise(athleteId, exercise.name).then(setLastEntries).catch(() => setLastEntries([]));
@@ -173,19 +187,26 @@ function ExerciseCard({
   const getLastForSeries = (seriesNumber: number) => lastEntries.find((e) => e.series_number === seriesNumber);
   const getTodayForSeries = (seriesNumber: number) => todayEntries.find((e) => e.series_number === seriesNumber);
 
+  const bestLastLoad = lastEntries.reduce((max, e) => (e.load && e.load > max ? e.load : max), 0);
+  const doneCount = seriesList.filter((s) => getTodayForSeries(s.number)).length;
+
   const handleSave = async (seriesNumber: number) => {
     const v = values[seriesNumber];
     if (!v?.reps && !v?.load) return;
     setSavingSeries(seriesNumber);
     try {
+      const load = v.load ? parseFloat(v.load.replace(',', '.')) : undefined;
       await createPerformance({
         athlete_id: athleteId,
         program_session_id: sessionId,
         exercise: exercise.name,
         series_number: seriesNumber,
         reps: v.reps ? parseFloat(v.reps.replace(',', '.')) : undefined,
-        load: v.load ? parseFloat(v.load.replace(',', '.')) : undefined,
+        load,
       });
+      if (load && bestLastLoad && load > bestLastLoad) {
+        setJustPR(seriesNumber);
+      }
       onLogged();
     } catch {
       // ignore - l'utilisateur peut réessayer
@@ -194,11 +215,21 @@ function ExerciseCard({
     }
   };
 
+  const isComplete = doneCount === seriesList.length;
+
   return (
-    <Card style={{ marginBottom: spacing.lg }}>
+    <Card style={[{ marginBottom: spacing.lg }, isComplete && styles.exerciseCardDone]}>
       <View style={styles.exerciseHeader}>
-        <Text style={styles.exerciseName}>{exercise.name}</Text>
-        {exercise.muscle ? <Badge label={exercise.muscle} color={muscleColors[exercise.muscle] ?? colors.primary} /> : null}
+        <View style={styles.exerciseIndex}>
+          <Text style={styles.exerciseIndexText}>{index}</Text>
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.exerciseName}>{exercise.name}</Text>
+          <View style={styles.chipRow}>
+            {exercise.muscle ? <Badge label={exercise.muscle} color={muscleColors[exercise.muscle] ?? colors.primary} /> : null}
+            {isComplete && <Badge label="✓ FAIT" color={colors.success} />}
+          </View>
+        </View>
         {isCoach && (
           <Button
             title="✕"
@@ -218,16 +249,22 @@ function ExerciseCard({
         {seriesList.map((s) => {
           const last = getLastForSeries(s.number);
           const done = getTodayForSeries(s.number);
+          const isPR = justPR === s.number || (done?.load && bestLastLoad && done.load > bestLastLoad);
           return (
             <View key={s.number} style={styles.seriesRow}>
-              <Text style={styles.seriesLabel}>S{s.number}</Text>
+              <View style={[styles.seriesBadge, done && styles.seriesBadgeDone]}>
+                <Text style={[styles.seriesBadgeText, done && { color: '#fff' }]}>{s.number}</Text>
+              </View>
               <Text style={styles.seriesDesc} numberOfLines={1}>{s.description || '-'}</Text>
               {readOnly ? (
                 <Text style={styles.doneText}>
                   {done ? `${done.reps ?? '-'} reps · ${done.load ?? '-'}kg` : '—'}
                 </Text>
               ) : done ? (
-                <Text style={styles.doneText}>✓ {done.reps}×{done.load}kg</Text>
+                <View style={styles.doneRow}>
+                  {isPR ? <Text style={styles.prBadge}>🏆 PR</Text> : null}
+                  <Text style={styles.doneText}>{done.reps}×{done.load}kg</Text>
+                </View>
               ) : (
                 <View style={styles.inputsRow}>
                   <Input
@@ -244,12 +281,11 @@ function ExerciseCard({
                     value={values[s.number]?.load ?? ''}
                     onChangeText={(t) => setValues((v) => ({ ...v, [s.number]: { ...v[s.number], load: t } }))}
                   />
-                  <Button
-                    title="OK"
-                    onPress={() => handleSave(s.number)}
-                    loading={savingSeries === s.number}
-                    style={styles.okButton}
-                  />
+                  <Pressable onPress={() => handleSave(s.number)} disabled={savingSeries === s.number} style={{ opacity: savingSeries === s.number ? 0.6 : 1 }}>
+                    <LinearGradient colors={gradients.success} style={styles.okButton}>
+                      <Text style={styles.okButtonText}>{savingSeries === s.number ? '…' : '✓'}</Text>
+                    </LinearGradient>
+                  </Pressable>
                 </View>
               )}
             </View>
@@ -263,21 +299,40 @@ function ExerciseCard({
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.lg, paddingBottom: spacing.xxl },
-  title: { color: colors.text, fontSize: fontSize.xl, fontWeight: '800', marginBottom: spacing.lg },
-  exerciseHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  exerciseName: { color: colors.text, fontSize: fontSize.md, fontWeight: '700', flex: 1, marginRight: spacing.sm },
-  exerciseMeta: { color: colors.textMuted, fontSize: fontSize.sm, marginTop: spacing.xs },
+  header: { marginBottom: spacing.lg },
+  title: { color: colors.text, fontSize: fontSize.xxl, fontWeight: '900' },
+  subtitle: { color: colors.textMuted, fontSize: fontSize.sm, fontWeight: '600', marginTop: spacing.xs, marginBottom: spacing.md },
+  exerciseCardDone: { borderColor: colors.success, opacity: 0.92 },
+  exerciseHeader: { flexDirection: 'row', alignItems: 'flex-start' },
+  exerciseIndex: {
+    width: 30, height: 30, borderRadius: radius.sm, backgroundColor: colors.surfaceHi,
+    alignItems: 'center', justifyContent: 'center', marginRight: spacing.sm,
+  },
+  exerciseIndexText: { color: colors.textMuted, fontWeight: '800', fontSize: fontSize.sm },
+  exerciseName: { color: colors.text, fontSize: fontSize.md, fontWeight: '800' },
+  chipRow: { flexDirection: 'row', gap: spacing.xs, marginTop: spacing.xs, flexWrap: 'wrap' },
+  exerciseMeta: { color: colors.textMuted, fontSize: fontSize.sm, marginTop: spacing.sm, fontWeight: '600' },
   remark: { color: colors.warning, fontSize: fontSize.sm, marginTop: spacing.xs },
   seriesRow: {
     flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm,
     borderTopWidth: 1, borderTopColor: colors.border, gap: spacing.sm,
   },
-  seriesLabel: { color: colors.primary, fontWeight: '700', width: 28 },
+  seriesBadge: {
+    width: 26, height: 26, borderRadius: 13, backgroundColor: colors.surfaceAlt,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  seriesBadgeDone: { backgroundColor: colors.success },
+  seriesBadgeText: { color: colors.textMuted, fontWeight: '800', fontSize: fontSize.xs },
   seriesDesc: { color: colors.textMuted, flex: 1, fontSize: fontSize.sm },
-  doneText: { color: colors.success, fontWeight: '600', fontSize: fontSize.sm },
+  doneRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  prBadge: { color: colors.gold, fontWeight: '800', fontSize: fontSize.xs },
+  doneText: { color: colors.success, fontWeight: '800', fontSize: fontSize.sm },
   inputsRow: { flexDirection: 'row', gap: spacing.xs, alignItems: 'center' },
   smallInput: { width: 56, paddingVertical: spacing.sm, textAlign: 'center' },
-  okButton: { paddingVertical: spacing.sm, paddingHorizontal: spacing.sm },
+  okButton: {
+    width: 40, height: 40, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', ...shadow.card,
+  },
+  okButtonText: { color: '#08240F', fontWeight: '900', fontSize: fontSize.md },
   deleteExerciseBtn: { paddingVertical: 2, paddingHorizontal: spacing.xs, marginLeft: spacing.xs },
   suggestionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.sm },
   formRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },

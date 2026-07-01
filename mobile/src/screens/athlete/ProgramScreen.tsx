@@ -10,9 +10,11 @@ import { ProgramDTO } from '../../api/types';
 import { Badge, Button, Card, EmptyState, ErrorView, Input, LoadingView, SectionTitle } from '../../components/ui';
 import { colors, fontSize, muscleColors, radius, spacing } from '../../theme';
 import { AthleteStackParamList } from '../../navigation/types';
-import { DAY_NAMES, DAY_NAMES_SHORT } from '../../utils/format';
+import { DAY_NAMES, DAY_NAMES_SHORT, jsWeekdayToBackend } from '../../utils/format';
 
 type Nav = NativeStackNavigationProp<AthleteStackParamList, 'Program'>;
+
+const TODAY_DOW = jsWeekdayToBackend(new Date().getDay());
 
 export default function ProgramScreen() {
   const navigation = useNavigation<Nav>();
@@ -76,7 +78,7 @@ export default function ProgramScreen() {
     >
       {isCoach && (
         <Card style={{ marginBottom: spacing.lg }}>
-          <SectionTitle>Nouveau programme</SectionTitle>
+          <SectionTitle icon="➕">Nouveau programme</SectionTitle>
           <View style={styles.row}>
             <Input
               style={{ flex: 1 }}
@@ -90,7 +92,7 @@ export default function ProgramScreen() {
       )}
 
       {programs.length === 0 ? (
-        <EmptyState title="Aucun programme assigné" subtitle={isCoach ? 'Crée un programme ci-dessus.' : "Ton coach n'a pas encore créé de programme."} />
+        <EmptyState icon="🏋️" title="Aucun programme assigné" subtitle={isCoach ? 'Crée un programme ci-dessus.' : "Ton coach n'a pas encore créé de programme."} />
       ) : (
         programs.map((program) => (
           <ProgramCard
@@ -144,29 +146,36 @@ function ProgramCard({
   return (
     <Card style={{ marginBottom: spacing.lg }}>
       <View style={styles.cardHeader}>
-        <SectionTitle style={{ marginBottom: 0, flex: 1 }}>{full.name}</SectionTitle>
+        <SectionTitle style={{ marginBottom: 0, flex: 1 }} icon="🏋️">{full.name}</SectionTitle>
         {isCoach && <Button title="Suppr." variant="danger" onPress={onDeleteProgram} style={styles.smallBtn} />}
       </View>
 
       {(full.sessions ?? []).length === 0 ? (
         <Text style={styles.mutedText}>Aucune séance dans ce programme.</Text>
       ) : (
-        (full.sessions ?? []).map((session) => (
-          <Pressable key={session.id} style={styles.sessionRow} onPress={() => onPressSession(session.id)}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.dayLabel}>{DAY_NAMES[session.day_of_week]}</Text>
-              <Text style={styles.sessionName}>{session.session_name}</Text>
-              <View style={styles.chipRow}>
-                {session.exercises.slice(0, 4).map((ex) => (
-                  <Badge key={ex.id} label={ex.name} color={muscleColors[ex.muscle ?? ''] ?? colors.primary} />
-                ))}
-                {session.exercises.length > 4 ? <Badge label={`+${session.exercises.length - 4}`} color={colors.textMuted} /> : null}
-                {session.exercises.length === 0 ? <Text style={styles.emptySession}>Aucun exercice — appuyer pour ajouter</Text> : null}
+        (full.sessions ?? []).map((session) => {
+          const isToday = session.day_of_week === TODAY_DOW;
+          return (
+            <Pressable key={session.id} style={[styles.sessionRow, isToday && styles.sessionRowToday]} onPress={() => onPressSession(session.id)}>
+              <View style={[styles.dayBar, isToday && styles.dayBarToday]} />
+              <View style={{ flex: 1 }}>
+                <View style={styles.dayLabelRow}>
+                  <Text style={[styles.dayLabel, isToday && styles.dayLabelToday]}>{DAY_NAMES[session.day_of_week]}</Text>
+                  {isToday && <Badge label="AUJOURD'HUI" color={colors.primary} />}
+                </View>
+                <Text style={styles.sessionName}>{session.session_name}</Text>
+                <View style={styles.chipRow}>
+                  {session.exercises.slice(0, 4).map((ex) => (
+                    <Badge key={ex.id} label={ex.name} color={muscleColors[ex.muscle ?? ''] ?? colors.primary} />
+                  ))}
+                  {session.exercises.length > 4 ? <Badge label={`+${session.exercises.length - 4}`} color={colors.textMuted} /> : null}
+                  {session.exercises.length === 0 ? <Text style={styles.emptySession}>Aucun exercice — appuyer pour ajouter</Text> : null}
+                </View>
               </View>
-            </View>
-            <Text style={styles.chevron}>›</Text>
-          </Pressable>
-        ))
+              <Text style={styles.chevron}>›</Text>
+            </Pressable>
+          );
+        })
       )}
 
       {isCoach && (
@@ -200,10 +209,15 @@ const styles = StyleSheet.create({
   smallBtn: { paddingVertical: spacing.xs, paddingHorizontal: spacing.sm },
   sessionRow: {
     flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.md,
-    borderTopWidth: 1, borderTopColor: colors.border,
+    borderTopWidth: 1, borderTopColor: colors.border, gap: spacing.md,
   },
-  dayLabel: { color: colors.primary, fontSize: fontSize.xs, fontWeight: '700', textTransform: 'uppercase', marginBottom: 2 },
-  sessionName: { color: colors.text, fontSize: fontSize.md, fontWeight: '600', marginBottom: spacing.sm },
+  sessionRowToday: { backgroundColor: colors.primarySoft, marginHorizontal: -spacing.lg, paddingHorizontal: spacing.lg, borderTopColor: 'transparent' },
+  dayBar: { width: 3, height: '100%', borderRadius: 2, backgroundColor: 'transparent' },
+  dayBarToday: { backgroundColor: colors.primary },
+  dayLabelRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: 2 },
+  dayLabel: { color: colors.textMuted, fontSize: fontSize.xs, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
+  dayLabelToday: { color: colors.primary },
+  sessionName: { color: colors.text, fontSize: fontSize.md, fontWeight: '700', marginBottom: spacing.sm },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   chevron: { color: colors.textFaint, fontSize: 24 },
   mutedText: { color: colors.textMuted },
@@ -214,5 +228,5 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   dayChipDisabled: { backgroundColor: colors.surfaceAlt, opacity: 0.4 },
-  dayChipText: { color: '#fff', fontWeight: '600', fontSize: fontSize.sm },
+  dayChipText: { color: '#fff', fontWeight: '700', fontSize: fontSize.sm },
 });

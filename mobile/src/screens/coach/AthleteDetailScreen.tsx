@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { RouteProp, useRoute } from '@react-navigation/native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { AthleteScopeProvider } from '../../context/AthleteScopeContext';
-import { colors, fontSize, radius, spacing } from '../../theme';
+import { colors, fontSize, gradients, radius, spacing } from '../../theme';
 import { CoachStackParamList } from '../../navigation/types';
 import ProgramScreen from '../athlete/ProgramScreen';
 import JournalScreen from '../athlete/JournalScreen';
@@ -14,12 +15,12 @@ import StatsScreen from '../athlete/StatsScreen';
 type Route = RouteProp<CoachStackParamList, 'AthleteDetail'>;
 
 const TABS = [
-  { key: 'program', label: 'Programme' },
-  { key: 'journal', label: 'Journal' },
-  { key: 'performance', label: 'Perf.' },
-  { key: 'stats', label: 'Stats' },
-  { key: 'nutrition', label: 'Nutrition' },
-  { key: 'objectives', label: 'Objectifs' },
+  { key: 'program', label: 'Programme', icon: '🏋️' },
+  { key: 'journal', label: 'Journal', icon: '📓' },
+  { key: 'performance', label: 'Perf.', icon: '📈' },
+  { key: 'stats', label: 'Stats', icon: '📊' },
+  { key: 'nutrition', label: 'Nutrition', icon: '🍽️' },
+  { key: 'objectives', label: 'Objectifs', icon: '🎯' },
 ] as const;
 
 type TabKey = typeof TABS[number]['key'];
@@ -32,15 +33,22 @@ export default function AthleteDetailScreen() {
     <AthleteScopeProvider athleteId={params.athleteId} athleteName={params.athleteName} readOnly>
       <View style={styles.screen}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsBar} contentContainerStyle={styles.tabsContent}>
-          {TABS.map((tab) => (
-            <Pressable
-              key={tab.key}
-              onPress={() => setActive(tab.key)}
-              style={[styles.tabChip, active === tab.key && styles.tabChipActive]}
-            >
-              <Text style={[styles.tabLabel, active === tab.key && styles.tabLabelActive]}>{tab.label}</Text>
-            </Pressable>
-          ))}
+          {TABS.map((tab) => {
+            const isActive = active === tab.key;
+            return (
+              <Pressable key={tab.key} onPress={() => setActive(tab.key)}>
+                {isActive ? (
+                  <LinearGradient colors={gradients.primary} style={styles.tabChip}>
+                    <Text style={styles.tabLabelActive}>{tab.icon} {tab.label}</Text>
+                  </LinearGradient>
+                ) : (
+                  <View style={styles.tabChipInactive}>
+                    <Text style={styles.tabLabel}>{tab.icon} {tab.label}</Text>
+                  </View>
+                )}
+              </Pressable>
+            );
+          })}
         </ScrollView>
 
         <View style={{ flex: 1 }}>
@@ -58,10 +66,10 @@ export default function AthleteDetailScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
-  tabsBar: { borderBottomWidth: 1, borderBottomColor: colors.border, flexGrow: 0 },
-  tabsContent: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: spacing.sm },
-  tabChip: { paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radius.pill, backgroundColor: colors.surface },
-  tabChipActive: { backgroundColor: colors.primary },
-  tabLabel: { color: colors.textMuted, fontWeight: '600', fontSize: fontSize.sm },
-  tabLabelActive: { color: '#fff' },
+  tabsBar: { borderBottomWidth: 1, borderBottomColor: colors.border, flexGrow: 0, backgroundColor: colors.backgroundAlt },
+  tabsContent: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: spacing.xs },
+  tabChip: { paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radius.pill },
+  tabChipInactive: { paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radius.pill, backgroundColor: colors.surface },
+  tabLabel: { color: colors.textMuted, fontWeight: '700', fontSize: fontSize.xs },
+  tabLabelActive: { color: '#fff', fontWeight: '800', fontSize: fontSize.xs },
 });

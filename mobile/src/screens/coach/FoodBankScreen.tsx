@@ -74,7 +74,7 @@ export default function FoodBankScreen() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(search); }} tintColor={colors.primary} />}
     >
       <Card style={{ marginBottom: spacing.lg }}>
-        <SectionTitle>Nouvel aliment</SectionTitle>
+        <SectionTitle icon="🍎">Nouvel aliment</SectionTitle>
         <Input placeholder="Nom" value={name} onChangeText={setName} />
         <View style={styles.macroRow}>
           <Input style={styles.macroInput} placeholder="kcal/100g" keyboardType="numeric" value={kcal} onChangeText={setKcal} />
@@ -95,14 +95,14 @@ export default function FoodBankScreen() {
       />
 
       {foods.length === 0 ? (
-        <EmptyState title="Aucun aliment trouvé" />
+        <EmptyState icon="🍎" title="Aucun aliment trouvé" />
       ) : (
         foods.map((food) => (
           <Card key={food.id} style={styles.foodRow}>
             <View style={{ flex: 1 }}>
               <Text style={styles.foodName}>{food.name}</Text>
               <Text style={styles.foodMacros}>
-                {food.kcal}kcal · P{food.proteins ?? '-'} · G{food.carbs} · L{food.lipids ?? '-'} (/100g)
+                🔥{food.kcal}kcal · 🥩{food.proteins ?? '-'} · 🍚{food.carbs} · 🥑{food.lipids ?? '-'} (/100g)
               </Text>
             </View>
             <Button title="✕" variant="ghost" onPress={() => handleDelete(food.id)} style={styles.deleteBtn} />
@@ -119,7 +119,7 @@ const styles = StyleSheet.create({
   macroRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
   macroInput: { flex: 1 },
   foodRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.sm },
-  foodName: { color: colors.text, fontWeight: '600' },
-  foodMacros: { color: colors.textMuted, fontSize: fontSize.xs, marginTop: 2 },
+  foodName: { color: colors.text, fontWeight: '700' },
+  foodMacros: { color: colors.textMuted, fontSize: fontSize.xs, marginTop: 2, fontWeight: '600' },
   deleteBtn: { paddingVertical: 4, paddingHorizontal: spacing.sm },
 });

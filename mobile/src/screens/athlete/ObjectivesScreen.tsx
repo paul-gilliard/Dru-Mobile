@@ -71,13 +71,13 @@ export default function ObjectivesScreen() {
     >
       {isCoach && (
         <Card style={{ marginBottom: spacing.lg }}>
-          <SectionTitle>Nouvel objectif</SectionTitle>
+          <SectionTitle icon="🎯">Nouvel objectif</SectionTitle>
           <Input placeholder="Titre" value={title} onChangeText={setTitle} />
           <Input
             placeholder="Description (optionnel)"
             value={description}
             onChangeText={setDescription}
-            style={{ marginTop: spacing.sm }}
+            style={{ marginTop: spacing.sm, minHeight: 70, textAlignVertical: 'top' }}
             multiline
           />
           <Button title="Ajouter" onPress={handleCreate} loading={saving} disabled={!title.trim()} style={{ marginTop: spacing.md }} />
@@ -85,13 +85,14 @@ export default function ObjectivesScreen() {
       )}
 
       {objectives.length === 0 ? (
-        <EmptyState title="Aucun objectif" subtitle="Aucun objectif n'a encore été défini." />
+        <EmptyState icon="🎯" title="Aucun objectif" subtitle="Aucun objectif n'a encore été défini." />
       ) : (
         objectives.map((o) => (
-          <Card key={o.id} style={{ marginBottom: spacing.md }}>
+          <Card key={o.id} style={{ marginBottom: spacing.md }} glow>
             <View style={styles.row}>
+              <Text style={styles.icon}>🎯</Text>
               <View style={{ flex: 1 }}>
-                <Text style={styles.title}>🎯 {o.title}</Text>
+                <Text style={styles.title}>{o.title}</Text>
                 {o.description ? <Text style={styles.description}>{o.description}</Text> : null}
               </View>
               {isCoach && (
@@ -109,7 +110,8 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.lg, paddingBottom: spacing.xxl },
   row: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
-  title: { color: colors.text, fontWeight: '700', fontSize: fontSize.md },
+  icon: { fontSize: 20 },
+  title: { color: colors.text, fontWeight: '800', fontSize: fontSize.md },
   description: { color: colors.textMuted, marginTop: spacing.xs },
   deleteButton: { paddingVertical: spacing.xs, paddingHorizontal: spacing.sm },
 });

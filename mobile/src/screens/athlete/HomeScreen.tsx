@@ -2,12 +2,13 @@ import React, { useCallback, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../context/AuthContext';
 import { getAthleteDashboard } from '../../api/resources';
 import { apiErrorMessage } from '../../api/client';
 import { AthleteDashboardDTO } from '../../api/types';
-import { Badge, Button, Card, ErrorView, LoadingView, SectionTitle } from '../../components/ui';
-import { colors, fontSize, muscleColors, spacing } from '../../theme';
+import { Badge, Button, Card, EmptyState, ErrorView, LoadingView, SectionTitle } from '../../components/ui';
+import { colors, fontSize, gradients, muscleColors, radius, shadow, spacing } from '../../theme';
 import { AthleteStackParamList } from '../../navigation/types';
 import { DAY_NAMES } from '../../utils/format';
 
@@ -40,6 +41,8 @@ export default function HomeScreen() {
   if (error) return <ErrorView message={error} onRetry={load} />;
   if (!data) return null;
 
+  const firstName = (user?.display_name ?? '').split(' ')[0];
+
   return (
     <ScrollView
       style={styles.screen}
@@ -48,37 +51,55 @@ export default function HomeScreen() {
     >
       <View style={styles.headerRow}>
         <View>
-          <Text style={styles.greeting}>Salut {user?.display_name} 👋</Text>
           <Text style={styles.dateText}>{DAY_NAMES[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1]}</Text>
+          <Text style={styles.greeting}>Salut {firstName} 💪</Text>
         </View>
-        <Button title="Déconnexion" variant="ghost" onPress={logout} />
+        <Button title="⏻" variant="ghost" onPress={logout} style={styles.logoutBtn} />
+      </View>
+
+      {data.today_session ? (
+        <LinearGradient colors={gradients.primary} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.heroCard, shadow.glow]}>
+          <Text style={styles.heroLabel}>🔥 SÉANCE DU JOUR</Text>
+          <Text style={styles.heroTitle}>{data.today_session.session_name}</Text>
+          <View style={styles.chipRow}>
+            {data.today_session.exercises.slice(0, 5).map((ex) => (
+              <View key={ex.id} style={styles.heroChip}>
+                <Text style={styles.heroChipText}>{ex.name}</Text>
+              </View>
+            ))}
+          </View>
+          <Button
+            title="Attaquer la séance"
+            variant="secondary"
+            onPress={() => navigation.navigate('SessionDetail', { sessionId: data.today_session!.id })}
+            style={{ marginTop: spacing.lg, backgroundColor: 'rgba(0,0,0,0.28)', borderColor: 'rgba(255,255,255,0.3)' }}
+          />
+        </LinearGradient>
+      ) : (
+        <Card style={styles.restCard}>
+          <Text style={styles.restEmoji}>😴</Text>
+          <Text style={styles.restTitle}>Repos aujourd'hui</Text>
+          <Text style={styles.mutedText}>Pas de séance programmée. Récupération = progression 🧘</Text>
+        </Card>
+      )}
+
+      <View style={styles.statsRow}>
+        <Card style={styles.statCard}>
+          <Text style={[styles.statBig, { color: data.has_logged_today ? colors.success : colors.textFaint }]}>
+            {data.has_logged_today ? '✓' : '—'}
+          </Text>
+          <Text style={styles.statLabel}>Journal du jour</Text>
+        </Card>
+        <Card style={styles.statCard}>
+          <Text style={[styles.statBig, { color: colors.gold }]}>{data.objectives.length}</Text>
+          <Text style={styles.statLabel}>Objectifs actifs</Text>
+        </Card>
       </View>
 
       <Card style={{ marginTop: spacing.lg }}>
-        <SectionTitle>Séance du jour</SectionTitle>
-        {data.today_session ? (
-          <View>
-            <Text style={styles.sessionName}>{data.today_session.session_name}</Text>
-            <View style={styles.chipRow}>
-              {data.today_session.exercises.slice(0, 6).map((ex) => (
-                <Badge key={ex.id} label={ex.name} color={muscleColors[ex.muscle ?? ''] ?? colors.primary} />
-              ))}
-            </View>
-            <Button
-              title="Voir la séance"
-              onPress={() => navigation.navigate('SessionDetail', { sessionId: data.today_session!.id })}
-              style={{ marginTop: spacing.md }}
-            />
-          </View>
-        ) : (
-          <Text style={styles.mutedText}>Pas de séance programmée aujourd'hui. Profites-en pour récupérer 💤</Text>
-        )}
-      </Card>
-
-      <Card style={{ marginTop: spacing.lg }}>
-        <SectionTitle>Journal du jour</SectionTitle>
+        <SectionTitle icon="📓">Journal du jour</SectionTitle>
         {data.has_logged_today ? (
-          <Text style={styles.okText}>✓ Journal déjà rempli aujourd'hui</Text>
+          <Text style={styles.okText}>✓ Nickel, journal rempli aujourd'hui</Text>
         ) : (
           <Text style={styles.mutedText}>Tu n'as pas encore rempli ton journal aujourd'hui.</Text>
         )}
@@ -91,23 +112,29 @@ export default function HomeScreen() {
       </Card>
 
       <Card style={{ marginTop: spacing.lg }}>
-        <SectionTitle>Objectifs en cours</SectionTitle>
+        <SectionTitle icon="🎯">Objectifs en cours</SectionTitle>
         {data.objectives.length === 0 ? (
-          <Text style={styles.mutedText}>Aucun objectif défini pour l'instant.</Text>
+          <EmptyState icon="🎯" title="Aucun objectif défini" subtitle="Ton coach peut t'en fixer un." />
         ) : (
           data.objectives.map((o) => (
             <View key={o.id} style={styles.objectiveRow}>
-              <Text style={styles.objectiveTitle}>🎯 {o.title}</Text>
-              {o.description ? <Text style={styles.mutedText}>{o.description}</Text> : null}
+              <View style={styles.objectiveDot} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.objectiveTitle}>{o.title}</Text>
+                {o.description ? <Text style={styles.mutedText}>{o.description}</Text> : null}
+              </View>
             </View>
           ))
         )}
       </Card>
 
       {data.program && (
-        <Card style={{ marginTop: spacing.lg }}>
-          <SectionTitle>Programme actuel</SectionTitle>
-          <Text style={styles.sessionName}>{data.program.name}</Text>
+        <Card style={{ marginTop: spacing.lg, marginBottom: spacing.lg }}>
+          <SectionTitle icon="🏋️">Programme actuel</SectionTitle>
+          <View style={styles.programRow}>
+            <Text style={styles.sessionName}>{data.program.name}</Text>
+            <Badge label="ACTIF" color={colors.success} />
+          </View>
           <Button
             title="Voir tout le programme"
             variant="secondary"
@@ -123,13 +150,34 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.lg, paddingBottom: spacing.xxl },
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  greeting: { color: colors.text, fontSize: fontSize.xl, fontWeight: '800' },
-  dateText: { color: colors.textMuted, marginTop: spacing.xs, textTransform: 'capitalize' },
-  sessionName: { color: colors.text, fontSize: fontSize.md, fontWeight: '700', marginBottom: spacing.sm },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: spacing.lg },
+  dateText: {
+    color: colors.textFaint, fontSize: fontSize.xs, fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 1,
+  },
+  greeting: { color: colors.text, fontSize: fontSize.xxl, fontWeight: '900', marginTop: 2 },
+  logoutBtn: { paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
+  heroCard: { borderRadius: radius.lg, padding: spacing.lg },
+  heroLabel: { color: 'rgba(255,255,255,0.85)', fontSize: fontSize.xs, fontWeight: '800', letterSpacing: 1 },
+  heroTitle: { color: '#fff', fontSize: fontSize.xl, fontWeight: '900', marginTop: spacing.xs, marginBottom: spacing.md },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  heroChip: { backgroundColor: 'rgba(0,0,0,0.25)', paddingHorizontal: spacing.sm, paddingVertical: 5, borderRadius: radius.pill },
+  heroChipText: { color: '#fff', fontSize: fontSize.xs, fontWeight: '700' },
+  restCard: { alignItems: 'center', paddingVertical: spacing.xl },
+  restEmoji: { fontSize: 40, marginBottom: spacing.sm },
+  restTitle: { color: colors.text, fontSize: fontSize.lg, fontWeight: '800' },
+  statsRow: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.lg },
+  statCard: { flex: 1, alignItems: 'center', paddingVertical: spacing.lg },
+  statBig: { fontSize: 30, fontWeight: '900' },
+  statLabel: {
+    color: colors.textMuted, fontSize: fontSize.xs, fontWeight: '700', marginTop: spacing.xs,
+    textTransform: 'uppercase', letterSpacing: 0.5, textAlign: 'center',
+  },
   mutedText: { color: colors.textMuted },
-  okText: { color: colors.success, fontWeight: '600' },
-  objectiveRow: { marginBottom: spacing.sm },
-  objectiveTitle: { color: colors.text, fontWeight: '600' },
+  okText: { color: colors.success, fontWeight: '700' },
+  objectiveRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: spacing.sm, gap: spacing.sm },
+  objectiveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.gold, marginTop: 6 },
+  objectiveTitle: { color: colors.text, fontWeight: '700' },
+  programRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  sessionName: { color: colors.text, fontSize: fontSize.md, fontWeight: '700' },
 });

@@ -6,7 +6,7 @@ import { useAthleteScope } from '../../context/AthleteScopeContext';
 import { getJournalTrend, getTonnageByMuscle } from '../../api/resources';
 import { apiErrorMessage } from '../../api/client';
 import { JournalTrendDTO, TonnageByMuscleDTO } from '../../api/types';
-import { Card, EmptyState, ErrorView, LoadingView, SectionTitle } from '../../components/ui';
+import { Card, EmptyState, ErrorView, LoadingView, SectionTitle, StatBlock } from '../../components/ui';
 import { colors, fontSize, muscleColors, spacing } from '../../theme';
 
 const screenWidth = Dimensions.get('window').width - spacing.lg * 2 - spacing.lg * 2;
@@ -15,10 +15,12 @@ const chartConfig = {
   backgroundGradientFrom: colors.surface,
   backgroundGradientTo: colors.surface,
   decimalPlaces: 0,
-  color: (opacity = 1) => `rgba(79, 140, 255, ${opacity})`,
-  labelColor: (opacity = 1) => `rgba(154, 163, 178, ${opacity})`,
-  propsForBackgroundLines: { stroke: colors.border },
-  barPercentage: 0.6,
+  color: (opacity = 1) => `rgba(255, 75, 38, ${opacity})`,
+  labelColor: (opacity = 1) => `rgba(156, 158, 168, ${opacity})`,
+  propsForBackgroundLines: { stroke: colors.border, strokeDasharray: '' },
+  barPercentage: 0.55,
+  fillShadowGradient: colors.primary,
+  fillShadowGradientOpacity: 1,
 };
 
 export default function StatsScreen() {
@@ -54,6 +56,11 @@ export default function StatsScreen() {
 
   const weightPoints = journalTrend.filter((j) => j.weight != null);
   const hasTonnage = (tonnage?.by_muscle.length ?? 0) > 0;
+  const totalTonnage = tonnage?.by_muscle.reduce((acc, m) => acc + m.tonnage, 0) ?? 0;
+  const topMuscle = tonnage?.by_muscle[0];
+  const weightDelta = weightPoints.length >= 2
+    ? (weightPoints[weightPoints.length - 1].weight as number) - (weightPoints[0].weight as number)
+    : null;
 
   return (
     <ScrollView
@@ -61,8 +68,25 @@ export default function StatsScreen() {
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
     >
+      <View style={styles.summaryRow}>
+        <Card style={styles.summaryCard}>
+          <StatBlock value={Math.round(totalTonnage).toLocaleString('fr-FR')} unit="kg" label="Tonnage 30j" color={colors.primary} />
+        </Card>
+        <Card style={styles.summaryCard}>
+          <StatBlock
+            value={weightDelta != null ? `${weightDelta > 0 ? '+' : ''}${weightDelta.toFixed(1)}` : '—'}
+            unit="kg"
+            label="Poids (30j)"
+            color={weightDelta != null && weightDelta < 0 ? colors.success : colors.gold}
+          />
+        </Card>
+      </View>
+
       <Card style={{ marginBottom: spacing.lg }}>
-        <SectionTitle>Tonnage par muscle (30j)</SectionTitle>
+        <View style={styles.cardHeaderRow}>
+          <SectionTitle icon="🔥" style={{ marginBottom: 0 }}>Tonnage par muscle</SectionTitle>
+          {topMuscle ? <Text style={styles.topMuscleTag}>👑 {topMuscle.muscle}</Text> : null}
+        </View>
         {hasTonnage ? (
           <BarChart
             data={{
@@ -78,7 +102,7 @@ export default function StatsScreen() {
             yAxisSuffix="kg"
           />
         ) : (
-          <EmptyState title="Pas encore de données" subtitle="Log des séries pour voir le tonnage apparaître ici." />
+          <EmptyState icon="📊" title="Pas encore de données" subtitle="Log des séries pour voir le tonnage apparaître ici." />
         )}
         {hasTonnage && (
           <View style={styles.legendRow}>
@@ -93,7 +117,7 @@ export default function StatsScreen() {
       </Card>
 
       <Card style={{ marginBottom: spacing.lg }}>
-        <SectionTitle>Évolution du poids (30j)</SectionTitle>
+        <SectionTitle icon="⚖️">Évolution du poids</SectionTitle>
         {weightPoints.length >= 2 ? (
           <LineChart
             data={{
@@ -109,13 +133,13 @@ export default function StatsScreen() {
             yAxisSuffix="kg"
           />
         ) : (
-          <EmptyState title="Pas assez de données" subtitle="Complète le journal quotidien pour voir la courbe de poids." />
+          <EmptyState icon="⚖️" title="Pas assez de données" subtitle="Complète le journal quotidien pour voir la courbe de poids." />
         )}
       </Card>
 
       {tonnage && tonnage.trend.length >= 2 && (
-        <Card>
-          <SectionTitle>Tonnage total / séance</SectionTitle>
+        <Card style={{ marginBottom: spacing.lg }}>
+          <SectionTitle icon="📈">Tonnage total / séance</SectionTitle>
           <LineChart
             data={{
               labels: tonnage.trend.map((t) => t.date.slice(5)),
@@ -137,9 +161,13 @@ export default function StatsScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.lg, paddingBottom: spacing.xxl },
+  summaryRow: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.lg },
+  summaryCard: { flex: 1, alignItems: 'center', paddingVertical: spacing.lg },
+  cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm },
+  topMuscleTag: { color: colors.gold, fontWeight: '800', fontSize: fontSize.xs },
   chart: { marginTop: spacing.sm, borderRadius: 14 },
   legendRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   dot: { width: 8, height: 8, borderRadius: 4 },
-  legendText: { color: colors.textMuted, fontSize: fontSize.xs },
+  legendText: { color: colors.textMuted, fontSize: fontSize.xs, fontWeight: '600' },
 });

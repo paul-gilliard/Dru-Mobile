@@ -9,18 +9,18 @@ import { Button, Card, EmptyState, ErrorView, Input, LoadingView, SectionTitle }
 import { colors, fontSize, spacing } from '../../theme';
 import { formatDateFR, isoDaysAgo, todayISO } from '../../utils/format';
 
-const FIELD_DEFS: { key: keyof JournalEntryDTO; label: string; unit?: string }[] = [
-  { key: 'weight', label: 'Poids', unit: 'kg' },
-  { key: 'sleep_hours', label: 'Sommeil', unit: 'h' },
-  { key: 'steps', label: 'Pas' },
-  { key: 'water_ml', label: 'Eau', unit: 'ml' },
-  { key: 'kcals', label: 'Calories', unit: 'kcal' },
-  { key: 'protein', label: 'Protéines', unit: 'g' },
-  { key: 'carbs', label: 'Glucides', unit: 'g' },
-  { key: 'fats', label: 'Lipides', unit: 'g' },
-  { key: 'energy', label: 'Énergie', unit: '/10' },
-  { key: 'stress', label: 'Stress', unit: '/10' },
-  { key: 'hunger', label: 'Faim', unit: '/10' },
+const FIELD_DEFS: { key: keyof JournalEntryDTO; label: string; unit?: string; icon: string }[] = [
+  { key: 'weight', label: 'Poids', unit: 'kg', icon: '⚖️' },
+  { key: 'sleep_hours', label: 'Sommeil', unit: 'h', icon: '💤' },
+  { key: 'steps', label: 'Pas', icon: '👟' },
+  { key: 'water_ml', label: 'Eau', unit: 'ml', icon: '💧' },
+  { key: 'kcals', label: 'Calories', unit: 'kcal', icon: '🔥' },
+  { key: 'protein', label: 'Protéines', unit: 'g', icon: '🥩' },
+  { key: 'carbs', label: 'Glucides', unit: 'g', icon: '🍚' },
+  { key: 'fats', label: 'Lipides', unit: 'g', icon: '🥑' },
+  { key: 'energy', label: 'Énergie', unit: '/10', icon: '⚡' },
+  { key: 'stress', label: 'Stress', unit: '/10', icon: '😤' },
+  { key: 'hunger', label: 'Faim', unit: '/10', icon: '🍽️' },
 ];
 
 export default function JournalScreen() {
@@ -80,6 +80,7 @@ export default function JournalScreen() {
   if (error) return <ErrorView message={error} onRetry={load} />;
 
   const history = entries.filter((e) => e.entry_date !== todayISO());
+  const streak = computeStreak(entries);
 
   return (
     <ScrollView
@@ -87,13 +88,20 @@ export default function JournalScreen() {
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
     >
+      {streak > 0 && (
+        <View style={styles.streakBanner}>
+          <Text style={styles.streakEmoji}>🔥</Text>
+          <Text style={styles.streakText}>{streak} jour{streak > 1 ? 's' : ''} de suite — continue comme ça !</Text>
+        </View>
+      )}
+
       {!readOnly && (
         <Card>
-          <SectionTitle>Aujourd'hui — {formatDateFR(todayISO())}</SectionTitle>
+          <SectionTitle icon="📓">Aujourd'hui — {formatDateFR(todayISO())}</SectionTitle>
           <View style={styles.grid}>
-            {FIELD_DEFS.map(({ key, label, unit }) => (
+            {FIELD_DEFS.map(({ key, label, unit, icon }) => (
               <View key={key as string} style={styles.gridItem}>
-                <Text style={styles.fieldLabel}>{label}{unit ? ` (${unit})` : ''}</Text>
+                <Text style={styles.fieldLabel}>{icon} {label}{unit ? ` (${unit})` : ''}</Text>
                 <Input
                   keyboardType="numeric"
                   value={form[key as string] ?? ''}
@@ -107,9 +115,9 @@ export default function JournalScreen() {
         </Card>
       )}
 
-      <SectionTitle style={{ marginTop: spacing.xl }}>Historique</SectionTitle>
+      <SectionTitle style={{ marginTop: spacing.xl }} icon="🗓️">Historique</SectionTitle>
       {history.length === 0 ? (
-        <EmptyState title="Aucune entrée précédente" />
+        <EmptyState icon="📓" title="Aucune entrée précédente" />
       ) : (
         history.map((entry) => (
           <Card key={entry.id} style={{ marginBottom: spacing.md }}>
@@ -127,13 +135,32 @@ export default function JournalScreen() {
   );
 }
 
+function computeStreak(entries: JournalEntryDTO[]): number {
+  const dates = new Set(entries.map((e) => e.entry_date));
+  let streak = 0;
+  const cursor = new Date();
+  while (true) {
+    const iso = cursor.toISOString().slice(0, 10);
+    if (!dates.has(iso)) break;
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.lg, paddingBottom: spacing.xxl },
+  streakBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm, backgroundColor: colors.goldSoft,
+    borderRadius: 16, padding: spacing.md, marginBottom: spacing.lg, borderWidth: 1, borderColor: colors.gold,
+  },
+  streakEmoji: { fontSize: 22 },
+  streakText: { color: colors.gold, fontWeight: '800', flex: 1, fontSize: fontSize.sm },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm },
   gridItem: { width: '31%' },
-  fieldLabel: { color: colors.textMuted, fontSize: fontSize.xs, marginBottom: spacing.xs },
-  historyDate: { color: colors.text, fontWeight: '700', marginBottom: spacing.xs, textTransform: 'capitalize' },
+  fieldLabel: { color: colors.textMuted, fontSize: fontSize.xs, marginBottom: spacing.xs, fontWeight: '600' },
+  historyDate: { color: colors.text, fontWeight: '800', marginBottom: spacing.xs, textTransform: 'capitalize' },
   historyRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
-  historyStat: { color: colors.textMuted, fontSize: fontSize.sm },
+  historyStat: { color: colors.textMuted, fontSize: fontSize.sm, fontWeight: '600' },
 });

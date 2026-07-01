@@ -35,7 +35,7 @@ export default function CreateAthleteScreen() {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Card>
-        <SectionTitle>Nouvel athlète</SectionTitle>
+        <SectionTitle icon="👤">Nouvel athlète</SectionTitle>
         <Text style={styles.label}>Nom affiché</Text>
         <Input value={displayName} onChangeText={setDisplayName} placeholder="Ex: Julie Dupont" />
 
