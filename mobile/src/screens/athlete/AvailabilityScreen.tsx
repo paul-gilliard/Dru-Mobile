@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
 import { listAvailability, setAvailability } from '../../api/resources';
@@ -67,9 +67,9 @@ export default function AvailabilityScreen() {
           <SectionTitle>{formatDateFR(date)}</SectionTitle>
           <View style={styles.slotsRow}>
             {daySlots.map((slot) => (
-              <View
+              <Pressable
                 key={slot.id}
-                onTouchEnd={() => toggle(slot)}
+                onPress={() => toggle(slot)}
                 style={[
                   styles.slot,
                   { backgroundColor: slot.available ? `${colors.success}26` : `${colors.danger}1A`, borderColor: slot.available ? colors.success : colors.border },
@@ -78,7 +78,7 @@ export default function AvailabilityScreen() {
                 <Text style={[styles.slotText, { color: slot.available ? colors.success : colors.textFaint }]}>
                   {TIMESLOT_LABELS[slot.timeslot] ?? slot.timeslot}
                 </Text>
-              </View>
+              </Pressable>
             ))}
           </View>
         </Card>

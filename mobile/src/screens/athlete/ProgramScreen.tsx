@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../../context/AuthContext';
@@ -152,7 +152,7 @@ function ProgramCard({
         <Text style={styles.mutedText}>Aucune séance dans ce programme.</Text>
       ) : (
         (full.sessions ?? []).map((session) => (
-          <View key={session.id} style={styles.sessionRow} onTouchEnd={() => onPressSession(session.id)}>
+          <Pressable key={session.id} style={styles.sessionRow} onPress={() => onPressSession(session.id)}>
             <View style={{ flex: 1 }}>
               <Text style={styles.dayLabel}>{DAY_NAMES[session.day_of_week]}</Text>
               <Text style={styles.sessionName}>{session.session_name}</Text>
@@ -165,7 +165,7 @@ function ProgramCard({
               </View>
             </View>
             <Text style={styles.chevron}>›</Text>
-          </View>
+          </Pressable>
         ))
       )}
 
@@ -173,13 +173,14 @@ function ProgramCard({
         addingSession ? (
           <View style={styles.dayPicker}>
             {DAY_NAMES_SHORT.map((label, day) => (
-              <View
+              <Pressable
                 key={day}
-                onTouchEnd={() => !usedDays.has(day) && handleAddDay(day)}
+                onPress={() => !usedDays.has(day) && handleAddDay(day)}
+                disabled={usedDays.has(day)}
                 style={[styles.dayChip, usedDays.has(day) && styles.dayChipDisabled]}
               >
                 <Text style={styles.dayChipText}>{savingDay === day ? '…' : label}</Text>
-              </View>
+              </Pressable>
             ))}
           </View>
         ) : (

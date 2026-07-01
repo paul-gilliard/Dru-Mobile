@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { getCoachDashboard } from '../../api/resources';
@@ -52,7 +52,7 @@ export default function CoachDashboardScreen() {
         <EmptyState title="Aucun athlète" subtitle="Ajoute ton premier athlète pour commencer." />
       ) : (
         athletes.map(({ athlete, last_journal_date, objectives_count, programs_count }) => (
-          <View key={athlete.id} onTouchEnd={() => navigation.navigate('AthleteDetail', { athleteId: athlete.id, athleteName: athlete.display_name })}>
+          <Pressable key={athlete.id} onPress={() => navigation.navigate('AthleteDetail', { athleteId: athlete.id, athleteName: athlete.display_name })}>
             <Card style={styles.athleteCard}>
               <View style={styles.avatar}>
                 <Text style={styles.avatarText}>{athlete.display_name.charAt(0).toUpperCase()}</Text>
@@ -69,7 +69,7 @@ export default function CoachDashboardScreen() {
               </View>
               <Text style={styles.chevron}>›</Text>
             </Card>
-          </View>
+          </Pressable>
         ))
       )}
     </ScrollView>

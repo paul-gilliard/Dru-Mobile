@@ -1,5 +1,5 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../../context/AuthContext';
@@ -27,13 +27,13 @@ export default function MoreScreen() {
       </Card>
 
       {items.map((item) => (
-        <View key={item.label} onTouchEnd={item.onPress}>
+        <Pressable key={item.label} onPress={item.onPress}>
           <Card style={styles.menuRow}>
             <Text style={styles.menuIcon}>{item.icon}</Text>
             <Text style={styles.menuLabel}>{item.label}</Text>
             <Text style={styles.chevron}>›</Text>
           </Card>
-        </View>
+        </Pressable>
       ))}
 
       <Button title="Déconnexion" variant="danger" onPress={logout} style={{ marginTop: spacing.xl }} />

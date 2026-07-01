@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -132,9 +132,9 @@ function AddExerciseForm({ sessionId, onAdded }: { sessionId: number; onAdded: (
       {bankNames.length > 0 && (
         <View style={styles.suggestionRow}>
           {bankNames.slice(0, 6).map((n) => (
-            <View key={n} onTouchEnd={() => setName(n)}>
+            <Pressable key={n} onPress={() => setName(n)}>
               <Badge label={n} color={colors.textMuted} />
-            </View>
+            </Pressable>
           ))}
         </View>
       )}

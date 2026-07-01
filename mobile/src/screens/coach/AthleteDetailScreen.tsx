@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import { AthleteScopeProvider } from '../../context/AthleteScopeContext';
 import { colors, fontSize, radius, spacing } from '../../theme';
@@ -31,13 +31,13 @@ export default function AthleteDetailScreen() {
       <View style={styles.screen}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsBar} contentContainerStyle={styles.tabsContent}>
           {TABS.map((tab) => (
-            <View
+            <Pressable
               key={tab.key}
-              onTouchEnd={() => setActive(tab.key)}
+              onPress={() => setActive(tab.key)}
               style={[styles.tabChip, active === tab.key && styles.tabChipActive]}
             >
               <Text style={[styles.tabLabel, active === tab.key && styles.tabLabelActive]}>{tab.label}</Text>
-            </View>
+            </Pressable>
           ))}
         </ScrollView>
 

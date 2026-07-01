@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { createExerciseBank, deleteExerciseBank, listExerciseBank } from '../../api/resources';
 import { apiErrorMessage } from '../../api/client';
@@ -78,9 +78,9 @@ export default function ExerciseBankScreen() {
         <Input placeholder="Nom de l'exercice" value={name} onChangeText={setName} />
         <View style={styles.muscleRow}>
           {muscleGroups.map((mg) => (
-            <View key={mg} onTouchEnd={() => setMuscle(mg)}>
+            <Pressable key={mg} onPress={() => setMuscle(mg)}>
               <Badge label={mg} color={muscle === mg ? (muscleColors[mg] ?? colors.primary) : colors.textFaint} />
-            </View>
+            </Pressable>
           ))}
         </View>
         <Button title="Ajouter" onPress={handleCreate} loading={saving} disabled={!name.trim()} style={{ marginTop: spacing.md }} />

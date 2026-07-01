@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
 import { useAthleteScope } from '../../context/AthleteScopeContext';
@@ -175,9 +175,9 @@ function FoodPicker({ onPick, onCancel }: { onPick: (food: FoodDTO, quantity: nu
       <Input placeholder="Rechercher un aliment..." value={query} onChangeText={setQuery} />
       <View style={styles.suggestionRow}>
         {foods.slice(0, 8).map((f) => (
-          <View key={f.id} onTouchEnd={() => setSelected(f)}>
+          <Pressable key={f.id} onPress={() => setSelected(f)}>
             <Badge label={f.name} color={selected?.id === f.id ? colors.primary : colors.textFaint} />
-          </View>
+          </Pressable>
         ))}
       </View>
       {selected && (
