@@ -264,3 +264,51 @@ pour l'instant :
 4. Générer les icônes/splash définitifs (actuellement les placeholders Expo).
 5. Builds de production : `eas build` (nécessite un compte Expo — à créer
    par toi, cf. consigne initiale sur les comptes que je ne peux pas créer).
+
+## Préparation APK + copie de la BDD de prod (session du 2 juillet)
+
+Tout ce qui pouvait être fait de façon autonome pour générer un APK qui se
+connecte à une **copie** (jamais la vraie prod) de la base MySQL/MariaDB de
+l'appli web est prêt :
+
+- `backend/requirements.txt` : ajout de `PyMySQL` + `cryptography` (déjà
+  installés dans le venv). Le backend lit déjà `DATABASE_URL` en variable
+  d'environnement (`app/__init__.py`), donc passer de SQLite à MySQL ne
+  demande aucun changement de code, juste une URL différente dans `.env`.
+- `backend/app/models.py` : la table de suivi "bilan hebdo coché" du mobile
+  s'appelle désormais explicitement `mobile_weekly_bilan_marking` (au lieu de
+  `weekly_bilan_marking`) pour ne jamais entrer en collision avec la vraie
+  table de l'appli web (schéma différent : coach_id/marked_at/expires_at côté
+  web vs athlete_id/done côté mobile). Toutes les autres tables (users,
+  programs, sessions, exercices, journal, performances, objectifs, dispos,
+  aliments, plans alimentaires) ont un schéma identique entre les deux apps.
+- `backend/scripts/copy_prod_db.ps1` : script PowerShell qui fait un
+  `mysqldump` de la base distante (prod) puis importe le résultat dans une
+  base MariaDB **locale** (XAMPP, détecté sur cette machine à
+  `C:\xampp\mysql\bin`) nommée `dru_mobile_copy`. Lecture seule côté prod,
+  écriture uniquement dans la copie locale.
+- `backend/scripts/migrate_copy_compat.sql` : ajoute la colonne
+  `display_name` (spécifique au mobile, absente côté web) et élargit
+  `password_hash` à 255 caractères, appliqué uniquement sur la copie.
+- `backend/.env.example` : documente le `DATABASE_URL` à utiliser en mode
+  "copie prod" (`mysql+pymysql://root:@127.0.0.1:3306/dru_mobile_copy`).
+- `mobile/src/api/config.ts` : `API_URL` peut désormais être surchargée via
+  la variable `EXPO_PUBLIC_API_URL` (utile pour builder l'APK avec l'IP
+  actuelle du PC sans toucher au code).
+- `mobile/app.json` + `mobile/eas.json` : package Android
+  (`com.drumobile.app`) et profils de build (`preview`/`production`, type
+  `apk`) prêts pour `eas build`.
+
+**Deux points bloquent la suite, non réalisables de façon autonome :**
+
+1. **URL publique de la base MySQL de prod.** `config.py` (appli web) ne
+   contient que l'hôte interne Railway (`mysql.railway.internal`), qui n'est
+   PAS joignable depuis un PC en dehors du réseau privé Railway. Il faut
+   l'hôte "Public Networking" (Railway dashboard → service MySQL → onglet
+   "Connect" → "Public Network", du style
+   `mysql://root:xxx@xxxxx.proxy.rlwy.net:PORT/railway`).
+2. **Compte Expo pour `eas build`.** Aucune session Expo n'existe sur cette
+   machine (`npx eas-cli whoami` → "Not logged in"). La connexion
+   (`npx eas login`) est interactive (email/mot de passe ou navigateur), donc
+   ne peut pas être automatisée — un compte Expo gratuit + un login manuel
+   sont nécessaires une seule fois.

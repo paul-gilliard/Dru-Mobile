@@ -4,6 +4,8 @@ backend/__pycache__/
 backend/**/__pycache__/
 backend/*.db
 backend/.env
+backend/scripts/*.sql.bak
+backend/scripts/prod_copy_dump.sql
 *.pyc
 
 ## Mobile (Expo / React Native / Node)

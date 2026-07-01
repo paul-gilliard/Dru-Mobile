@@ -4,3 +4,5 @@ Flask-Cors==4.0.1
 PyJWT==2.9.0
 python-dotenv==1.0.1
 Werkzeug==3.0.4
+PyMySQL==1.1.1
+cryptography==43.0.1

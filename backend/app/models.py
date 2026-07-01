@@ -357,6 +357,10 @@ class MealEntry(db.Model):
 
 
 class WeeklyBilanMarking(db.Model):
+    # Table dédiée à l'appli mobile (nom distinct de celle de l'appli web) pour
+    # ne jamais entrer en collision de schéma avec une éventuelle copie de la
+    # base de production connectée au backend mobile.
+    __tablename__ = 'mobile_weekly_bilan_marking'
     id = db.Column(db.Integer, primary_key=True)
     athlete_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
     week_start = db.Column(db.Date, nullable=False, index=True)  # lundi de la semaine concernée
