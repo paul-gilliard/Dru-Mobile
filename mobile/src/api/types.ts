@@ -162,3 +162,16 @@ export interface AthleteDashboardDTO {
 }
 
 export type DashboardDTO = CoachDashboardDTO | AthleteDashboardDTO;
+
+export interface TonnageByMuscleDTO {
+  by_muscle: { muscle: string; tonnage: number }[];
+  trend: { date: string; tonnage: number }[];
+}
+
+export interface JournalTrendDTO {
+  date: string;
+  weight: number | null;
+  kcals: number | null;
+  sleep_hours: number | null;
+  energy: number | null;
+}

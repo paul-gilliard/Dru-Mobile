@@ -1,7 +1,8 @@
 import { apiClient } from './client';
 import {
   AthleteDashboardDTO, AvailabilityDTO, CoachDashboardDTO, DashboardDTO, ExerciseBankDTO,
-  FoodDTO, JournalEntryDTO, MealPlanDTO, ObjectiveDTO, PerformanceEntryDTO, ProgramDTO, UserDTO,
+  FoodDTO, JournalEntryDTO, JournalTrendDTO, MealPlanDTO, ObjectiveDTO, PerformanceEntryDTO,
+  ProgramDTO, TonnageByMuscleDTO, UserDTO,
 } from './types';
 
 export async function getDashboard() {
@@ -209,6 +210,20 @@ export async function deleteMealEntry(entryId: number) {
 export async function setMealTime(planId: number, mealNumber: number, time: string, label: string) {
   const { data } = await apiClient.put(`/meal-plans/${planId}/meal-time`, {
     meal_number: mealNumber, time, label,
+  });
+  return data;
+}
+
+export async function getTonnageByMuscle(athleteId: number, days = 30) {
+  const { data } = await apiClient.get<TonnageByMuscleDTO>('/stats/tonnage-by-muscle', {
+    params: { athlete_id: athleteId, days },
+  });
+  return data;
+}
+
+export async function getJournalTrend(athleteId: number, days = 30) {
+  const { data } = await apiClient.get<JournalTrendDTO[]>('/stats/journal-trend', {
+    params: { athlete_id: athleteId, days },
   });
   return data;
 }

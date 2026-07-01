@@ -548,6 +548,65 @@ def update_performance(entry_id):
     return jsonify(entry.to_dict())
 
 
+@api_bp.get('/stats/tonnage-by-muscle')
+@login_required
+def stats_tonnage_by_muscle():
+    """Tonnage (reps x charge) cumule par groupe musculaire + tendance
+    journaliere, sur les N derniers jours (30 par defaut)."""
+    athlete_id = _scope_athlete_id(request.args.get('athlete_id'))
+    if athlete_id is None:
+        return jsonify({'error': 'athlete_id requis'}), 400
+    days = int(request.args.get('days', 30))
+    cutoff = date.today() - timedelta(days=days)
+
+    entries = (PerformanceEntry.query
+               .filter(PerformanceEntry.athlete_id == athlete_id,
+                       PerformanceEntry.entry_date >= cutoff)
+               .all())
+    muscle_by_name = {e.name: e.muscle_group for e in Exercise.query.all()}
+
+    totals = {}
+    trend = {}
+    for e in entries:
+        if not e.reps or not e.load:
+            continue
+        muscle = muscle_by_name.get(e.exercise, 'Autre') or 'Autre'
+        tonnage = e.reps * e.load
+        totals[muscle] = totals.get(muscle, 0) + tonnage
+        d = e.entry_date.isoformat()
+        trend[d] = trend.get(d, 0) + tonnage
+
+    by_muscle = [{'muscle': m, 'tonnage': round(t, 1)} for m, t in sorted(totals.items(), key=lambda kv: -kv[1])]
+    trend_out = [{'date': d, 'tonnage': round(t, 1)} for d, t in sorted(trend.items())]
+    return jsonify({'by_muscle': by_muscle, 'trend': trend_out})
+
+
+@api_bp.get('/stats/journal-trend')
+@login_required
+def stats_journal_trend():
+    """Historique poids / calories / sommeil sur les N derniers jours,
+    pour affichage sous forme de graphique."""
+    athlete_id = _scope_athlete_id(request.args.get('athlete_id'))
+    if athlete_id is None:
+        return jsonify({'error': 'athlete_id requis'}), 400
+    days = int(request.args.get('days', 30))
+    cutoff = date.today() - timedelta(days=days)
+    entries = (JournalEntry.query
+               .filter(JournalEntry.athlete_id == athlete_id, JournalEntry.entry_date >= cutoff)
+               .order_by(JournalEntry.entry_date.asc())
+               .all())
+    return jsonify([
+        {
+            'date': e.entry_date.isoformat(),
+            'weight': e.weight,
+            'kcals': e.kcals,
+            'sleep_hours': e.sleep_hours,
+            'energy': e.energy,
+        }
+        for e in entries
+    ])
+
+
 @api_bp.delete('/performance/<int:entry_id>')
 @login_required
 def delete_performance(entry_id):

@@ -9,6 +9,7 @@ import JournalScreen from '../athlete/JournalScreen';
 import PerformanceScreen from '../athlete/PerformanceScreen';
 import NutritionScreen from '../athlete/NutritionScreen';
 import ObjectivesScreen from '../athlete/ObjectivesScreen';
+import StatsScreen from '../athlete/StatsScreen';
 
 type Route = RouteProp<CoachStackParamList, 'AthleteDetail'>;
 
@@ -16,6 +17,7 @@ const TABS = [
   { key: 'program', label: 'Programme' },
   { key: 'journal', label: 'Journal' },
   { key: 'performance', label: 'Perf.' },
+  { key: 'stats', label: 'Stats' },
   { key: 'nutrition', label: 'Nutrition' },
   { key: 'objectives', label: 'Objectifs' },
 ] as const;
@@ -45,6 +47,7 @@ export default function AthleteDetailScreen() {
           {active === 'program' && <ProgramScreen />}
           {active === 'journal' && <JournalScreen />}
           {active === 'performance' && <PerformanceScreen />}
+          {active === 'stats' && <StatsScreen />}
           {active === 'nutrition' && <NutritionScreen />}
           {active === 'objectives' && <ObjectivesScreen />}
         </View>

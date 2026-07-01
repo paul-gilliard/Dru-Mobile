@@ -14,6 +14,7 @@ export default function MoreScreen() {
   const navigation = useNavigation<Nav>();
 
   const items: { label: string; icon: string; onPress: () => void }[] = [
+    { label: 'Statistiques', icon: '📊', onPress: () => navigation.navigate('Stats') },
     { label: 'Performances', icon: '📈', onPress: () => navigation.navigate('Performance') },
     { label: 'Disponibilités', icon: '🗓️', onPress: () => navigation.navigate('Availability') },
     { label: 'Objectifs', icon: '🎯', onPress: () => navigation.navigate('Objectives') },

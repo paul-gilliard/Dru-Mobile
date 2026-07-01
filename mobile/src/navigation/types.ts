@@ -8,6 +8,7 @@ export type AthleteStackParamList = {
   Performance: undefined;
   Availability: undefined;
   Objectives: undefined;
+  Stats: undefined;
 };
 
 export type CoachStackParamList = {
