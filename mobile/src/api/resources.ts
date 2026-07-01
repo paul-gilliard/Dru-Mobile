@@ -1,8 +1,9 @@
 import { apiClient } from './client';
 import {
-  AthleteDashboardDTO, AvailabilityDTO, CoachDashboardDTO, DashboardDTO, ExerciseBankDTO,
+  AthleteDashboardDTO, AttentionPanelDTO, AvailabilityDTO, CoachDashboardDTO, DashboardDTO, ExerciseBankDTO,
   FoodDTO, JournalEntryDTO, JournalTrendDTO, MealPlanDTO, ObjectiveDTO, PerformanceEntryDTO,
-  ProgramDTO, ProgramSessionDTO, TonnageByMuscleDTO, UserDTO, WeeklyBilanEntryDTO,
+  ProgramDTO, ProgramSessionDTO, RegularityPointDTO, RemarkDTO, TonnageByMuscleDTO, UserDTO,
+  WeeklyBilanEntryDTO, WeeklyComparisonDTO,
 } from './types';
 
 export async function getDashboard() {
@@ -289,5 +290,33 @@ export async function markWeeklyBilan(athleteId: number, weekStart?: string) {
 
 export async function unmarkWeeklyBilan(athleteId: number, weekStart?: string) {
   const { data } = await apiClient.post('/coach/bilan-hebdo/unmark', { athlete_id: athleteId, week_start: weekStart });
+  return data;
+}
+
+export async function getAttentionPanel(athleteId: number, weekA = 0, weekB = 1) {
+  const { data } = await apiClient.get<AttentionPanelDTO>('/coach/attention-panel', {
+    params: { athlete_id: athleteId, week_a: weekA, week_b: weekB },
+  });
+  return data;
+}
+
+export async function getWeeklyComparison(athleteId: number, weekA = 0, weekB = 1) {
+  const { data } = await apiClient.get<WeeklyComparisonDTO>('/stats/weekly-comparison', {
+    params: { athlete_id: athleteId, week_a: weekA, week_b: weekB },
+  });
+  return data;
+}
+
+export async function getRegularity(athleteId: number, weeks = 4) {
+  const { data } = await apiClient.get<RegularityPointDTO[]>('/stats/regularity', {
+    params: { athlete_id: athleteId, weeks },
+  });
+  return data;
+}
+
+export async function getRemarks(athleteId: number, limit = 30) {
+  const { data } = await apiClient.get<RemarkDTO[]>('/performance/remarks', {
+    params: { athlete_id: athleteId, limit },
+  });
   return data;
 }

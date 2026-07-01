@@ -6,6 +6,9 @@ import { getWeeklyBilan, markWeeklyBilan, unmarkWeeklyBilan } from '../../api/re
 import { apiErrorMessage } from '../../api/client';
 import { WeeklyBilanEntryDTO } from '../../api/types';
 import { Badge, Card, EmptyState, ErrorView, LoadingView, SectionTitle } from '../../components/ui';
+import AttentionPanel from '../../components/AttentionPanel';
+import WeeklyComparisonCard from '../../components/WeeklyComparisonCard';
+import RemarksList from '../../components/RemarksList';
 import { colors, fontSize, gradients, radius, spacing } from '../../theme';
 
 export default function WeeklyBilanScreen() {
@@ -53,61 +56,53 @@ export default function WeeklyBilanScreen() {
       {entries.length === 0 ? (
         <EmptyState icon="📈" title="Aucun athlète à afficher" />
       ) : (
-        entries.map((entry) => (
-          <Card key={entry.athlete.id} style={{ marginBottom: spacing.lg }} glow={!entry.done}>
-            <View style={styles.headerRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.athleteName}>{entry.athlete.display_name}</Text>
-                <Text style={styles.weekLabel}>Semaine du {entry.week_start}</Text>
-              </View>
-              <Pressable onPress={() => handleToggle(entry)}>
-                {entry.done ? (
-                  <LinearGradient colors={gradients.success} style={styles.doneChip}>
-                    <Text style={styles.doneChipText}>✓ Bilan fait</Text>
-                  </LinearGradient>
-                ) : (
-                  <View style={styles.todoChip}>
-                    <Text style={styles.todoChipText}>À faire</Text>
-                  </View>
-                )}
-              </Pressable>
-            </View>
-
-            <SectionTitle icon="📊" style={{ marginTop: spacing.md }}>Comparaison hebdomadaire</SectionTitle>
-            <View style={styles.table}>
-              <View style={styles.tableHeaderRow}>
-                <Text style={[styles.tableCell, styles.tableHeaderText, { flex: 2 }]}>Métrique</Text>
-                <Text style={[styles.tableCell, styles.tableHeaderText]}>Actuel</Text>
-                <Text style={[styles.tableCell, styles.tableHeaderText]}>Préc.</Text>
-                <Text style={[styles.tableCell, styles.tableHeaderText]}>Diff</Text>
-              </View>
-              {entry.metrics.map((m) => {
-                const diffColor = m.diff == null || m.diff === 0 ? colors.textFaint : m.diff > 0 ? colors.success : colors.danger;
-                return (
-                  <View key={m.key} style={styles.tableRow}>
-                    <Text style={[styles.tableCell, styles.metricLabel, { flex: 2 }]}>{m.label}</Text>
-                    <Text style={styles.tableCell}>{m.current ?? '—'}</Text>
-                    <Text style={[styles.tableCell, styles.mutedCell]}>{m.previous ?? '—'}</Text>
-                    <Text style={[styles.tableCell, { color: diffColor, fontWeight: '800' }]}>
-                      {m.diff == null ? '—' : m.diff > 0 ? `+${m.diff}` : m.diff}
-                    </Text>
-                  </View>
-                );
-              })}
-            </View>
-
-            {entry.objectives.length > 0 && (
-              <>
-                <SectionTitle icon="🎯" style={{ marginTop: spacing.md }}>Objectifs</SectionTitle>
-                <View style={styles.chipRow}>
-                  {entry.objectives.map((o) => <Badge key={o.id} label={o.title} color={colors.gold} />)}
-                </View>
-              </>
-            )}
-          </Card>
-        ))
+        entries.map((entry) => <AthleteBilanCard key={entry.athlete.id} entry={entry} onToggle={() => handleToggle(entry)} />)
       )}
     </ScrollView>
+  );
+}
+
+function AthleteBilanCard({ entry, onToggle }: { entry: WeeklyBilanEntryDTO; onToggle: () => void }) {
+  const [expanded, setExpanded] = useState(!entry.done);
+  const [weeks, setWeeks] = useState<{ a: number; b: number }>({ a: 0, b: 1 });
+
+  return (
+    <Card style={{ marginBottom: spacing.lg }} glow={!entry.done}>
+      <Pressable onPress={() => setExpanded((e) => !e)} style={styles.headerRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.athleteName}>{entry.athlete.display_name}</Text>
+          <Text style={styles.weekLabel}>Semaine du {entry.week_start} · {expanded ? 'Replier ▴' : 'Déplier ▾'}</Text>
+        </View>
+        <Pressable onPress={onToggle}>
+          {entry.done ? (
+            <LinearGradient colors={gradients.success} style={styles.doneChip}>
+              <Text style={styles.doneChipText}>✓ Bilan fait</Text>
+            </LinearGradient>
+          ) : (
+            <View style={styles.todoChip}>
+              <Text style={styles.todoChipText}>À faire</Text>
+            </View>
+          )}
+        </Pressable>
+      </Pressable>
+
+      {expanded && (
+        <View style={{ marginTop: spacing.md }}>
+          <AttentionPanel athleteId={entry.athlete.id} onWeeksChange={(a, b) => setWeeks({ a, b })} />
+          <WeeklyComparisonCard athleteId={entry.athlete.id} weekA={weeks.a} weekB={weeks.b} />
+          <RemarksList athleteId={entry.athlete.id} limit={10} />
+
+          {entry.objectives.length > 0 && (
+            <Card style={{ marginBottom: spacing.lg }}>
+              <SectionTitle icon="🎯">Objectifs</SectionTitle>
+              <View style={styles.chipRow}>
+                {entry.objectives.map((o) => <Badge key={o.id} label={o.title} color={colors.gold} />)}
+              </View>
+            </Card>
+          )}
+        </View>
+      )}
+    </Card>
   );
 }
 
@@ -126,12 +121,5 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border,
   },
   todoChipText: { color: colors.textMuted, fontWeight: '800', fontSize: fontSize.xs },
-  table: { marginTop: spacing.sm },
-  tableHeaderRow: { flexDirection: 'row', paddingBottom: spacing.xs, borderBottomWidth: 1, borderBottomColor: colors.border },
-  tableHeaderText: { color: colors.textFaint, fontWeight: '800', fontSize: fontSize.xs, textTransform: 'uppercase' },
-  tableRow: { flexDirection: 'row', paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
-  tableCell: { flex: 1, color: colors.text, fontSize: fontSize.sm, fontWeight: '700' },
-  metricLabel: { color: colors.textMuted, fontWeight: '600' },
-  mutedCell: { color: colors.textFaint },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.sm },
 });

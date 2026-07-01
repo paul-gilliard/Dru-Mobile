@@ -172,6 +172,55 @@ fonctionnalités cœur :
 - Sélecteur de lieu pour les disponibilités (un seul lieu existe dans les
   deux jeux de données actuels donc non bloquant).
 
+### Retours utilisateur (post-audit) : ergonomie athlète + richesse coach
+
+Suite aux retours après test réel de l'app, trois problèmes ont été corrigés :
+
+**1. Logging des performances athlète peu visible**
+Le formulaire de log existait déjà (dans l'écran Séance, série par série),
+mais rien ne guidait l'athlète vers une séance à logger.
+- `HomeScreen` : nouvelle carte **"Ma semaine"** listant toutes les séances du
+  programme actif (via le nouveau champ `week_sessions` du dashboard), avec un
+  bouton **"Démarrer"** (séance du jour) ou **"Logger"** (autres jours) par
+  ligne, et la date du dernier log affichée.
+- `ProgramScreen` : le simple chevron `›` sur chaque séance est remplacé par
+  un bouton explicite **"🔥 Démarrer"** / **"Logger ›"**.
+- `SessionDetailScreen` : ajout d'un champ **remarque optionnelle** (icône 💬)
+  par série au moment du log, envoyé via le champ `notes` déjà présent côté
+  backend/DB — remonte ensuite dans "Remarques de l'athlète" côté coach.
+
+**2. Navigation athlète simplifiée**
+Retrait des onglets **Objectifs, Disponibilités, Performances, Statistiques**
+du menu "Plus" et du navigateur athlète (ces informations restent gérées et
+consultées côté coach via `AthleteDetailScreen`, qui n'a pas été touché). Le
+menu "Plus" athlète devient un écran de profil minimal (infos compte +
+déconnexion).
+
+**3. "Easy Bilan Hebdo" et "Statistiques" coach : comblement complet**
+Les deux écrans étaient très sommaires comparés à la version web
+(`attention_panel.js` / `weekly_compare.js` côté web, ~aucun équivalent côté
+mobile). Ajout côté backend puis mobile :
+- `GET /api/coach/attention-panel` : réplique la logique de classification
+  web (Régressions / Vue du coach / Stagnations / Progrès / Nouveaux /
+  Abandonnés) par comparaison série-à-série entre deux semaines + comparaison
+  du poids corporel.
+- `GET /api/stats/weekly-comparison` : comparaison hebdo détaillée
+  (poids/kcal/eau/sommeil) + tonnage par groupe musculaire avec drill-down
+  par exercice.
+- `GET /api/stats/regularity` : nombre de séances loggées sur N semaines.
+- `GET /api/performance/remarks` : liste des remarques/notes laissées par
+  l'athlète en loggant ses séries.
+- Nouveaux composants mobile réutilisables : `AttentionPanel` (sélecteur de
+  semaines + 6 catégories + détail par série au clic), `WeeklyComparisonCard`
+  (tableau comparatif + modale de détail par muscle), `RemarksList`.
+- Intégrés dans **`WeeklyBilanScreen`** (Easy Bilan Hebdo, une carte
+  dépliable par athlète) et dans **`StatsScreen`** (utilisé par l'onglet
+  "Stats" de `AthleteDetailScreen` côté coach), en plus des graphiques
+  existants (tonnage/muscle, évolution du poids, tonnage/séance).
+- Testé via l'API (PowerShell `Invoke-RestMethod`) et en navigation réelle
+  (web Expo + CDP) pour les deux rôles : dashboard athlète avec `week_sessions`,
+  log d'une série avec remarque, Easy Bilan Hebdo complet, Stats enrichi.
+
 ## Comment lancer le projet
 
 Voir `README.md`. En résumé :
@@ -190,11 +239,11 @@ cette machine au moment du développement — à re-vérifier si elle change.
 
 Ces écrans web sont avancés/analytiques et n'ont pas d'équivalent mobile complet
 pour l'instant :
-- Page "Suivi" coach avancée : comparaison hebdo détaillée métrique par
-  métrique, graphiques radar de tonnage par groupe musculaire, "Analyse
-  croisée" (générateur de métriques custom). Une version simplifiée (tonnage/
-  muscle + tendance poids) existe dans l'onglet "Statistiques", et la
-  comparaison semaine/semaine par athlète existe via "Easy Bilan Hebdo".
+- "Analyse croisée" (générateur de métriques custom / graphiques radar
+  configurables à la volée sur `/coach/stats`). Le reste de la page "Suivi"
+  (points d'attention coach par classification, comparaison hebdo détaillée
+  métrique + tonnage/muscle avec drill-down, régularité) est désormais
+  couvert côté mobile (onglet "Statistiques" enrichi + "Easy Bilan Hebdo").
 - Vue base de données brute (`/coach/db-view`) — outil de debug interne, pas
   pertinent pour un utilisateur final sur mobile.
 - Édition fine des séries d'un exercice (l'app web permet des reps/repos/RIR

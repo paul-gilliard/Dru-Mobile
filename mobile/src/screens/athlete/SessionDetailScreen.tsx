@@ -225,7 +225,8 @@ function ExerciseCard({
   todayEntries: PerformanceEntryDTO[]; onLogged: () => void; onDeleted: () => void;
 }) {
   const [lastEntries, setLastEntries] = useState<PerformanceEntryDTO[]>([]);
-  const [values, setValues] = useState<Record<number, { reps: string; load: string }>>({});
+  const [values, setValues] = useState<Record<number, { reps: string; load: string; note: string }>>({});
+  const [noteOpenFor, setNoteOpenFor] = useState<number | null>(null);
   const [savingSeries, setSavingSeries] = useState<number | null>(null);
   const [justPR, setJustPR] = useState<number | null>(null);
   const [editing, setEditing] = useState(false);
@@ -257,10 +258,12 @@ function ExerciseCard({
         series_number: seriesNumber,
         reps: v.reps ? parseFloat(v.reps.replace(',', '.')) : undefined,
         load,
+        notes: v.note?.trim() ? v.note.trim() : undefined,
       });
       if (load && bestLastLoad && load > bestLastLoad) {
         setJustPR(seriesNumber);
       }
+      setNoteOpenFor(null);
       onLogged();
     } catch {
       // ignore - l'utilisateur peut réessayer
@@ -318,43 +321,60 @@ function ExerciseCard({
           const done = getTodayForSeries(s.number);
           const isPR = justPR === s.number || (done?.load && bestLastLoad && done.load > bestLastLoad);
           return (
-            <View key={s.number} style={styles.seriesRow}>
-              <View style={[styles.seriesBadge, done && styles.seriesBadgeDone]}>
-                <Text style={[styles.seriesBadgeText, done && { color: '#fff' }]}>{s.number}</Text>
+            <View key={s.number}>
+              <View style={styles.seriesRow}>
+                <View style={[styles.seriesBadge, done && styles.seriesBadgeDone]}>
+                  <Text style={[styles.seriesBadgeText, done && { color: '#fff' }]}>{s.number}</Text>
+                </View>
+                <Text style={styles.seriesDesc} numberOfLines={1}>{s.description || '-'}</Text>
+                {readOnly ? (
+                  <Text style={styles.doneText}>
+                    {done ? `${done.reps ?? '-'} reps · ${done.load ?? '-'}kg` : '—'}
+                  </Text>
+                ) : done ? (
+                  <View style={styles.doneRow}>
+                    {isPR ? <Text style={styles.prBadge}>🏆 PR</Text> : null}
+                    <Text style={styles.doneText}>{done.reps}×{done.load}kg</Text>
+                  </View>
+                ) : (
+                  <View style={styles.inputsRow}>
+                    <Input
+                      style={styles.smallInput}
+                      keyboardType="numeric"
+                      placeholder={last ? String(last.reps ?? '') : 'reps'}
+                      value={values[s.number]?.reps ?? ''}
+                      onChangeText={(t) => setValues((v) => ({ ...v, [s.number]: { ...v[s.number], reps: t } }))}
+                    />
+                    <Input
+                      style={styles.smallInput}
+                      keyboardType="numeric"
+                      placeholder={last ? String(last.load ?? '') : 'kg'}
+                      value={values[s.number]?.load ?? ''}
+                      onChangeText={(t) => setValues((v) => ({ ...v, [s.number]: { ...v[s.number], load: t } }))}
+                    />
+                    <Pressable
+                      onPress={() => setNoteOpenFor((cur) => (cur === s.number ? null : s.number))}
+                      style={styles.noteToggle}
+                    >
+                      <Text style={[styles.noteToggleText, !!values[s.number]?.note && styles.noteToggleActive]}>💬</Text>
+                    </Pressable>
+                    <Pressable onPress={() => handleSave(s.number)} disabled={savingSeries === s.number} style={{ opacity: savingSeries === s.number ? 0.6 : 1 }}>
+                      <LinearGradient colors={gradients.success} style={styles.okButton}>
+                        <Text style={styles.okButtonText}>{savingSeries === s.number ? '…' : '✓'}</Text>
+                      </LinearGradient>
+                    </Pressable>
+                  </View>
+                )}
               </View>
-              <Text style={styles.seriesDesc} numberOfLines={1}>{s.description || '-'}</Text>
-              {readOnly ? (
-                <Text style={styles.doneText}>
-                  {done ? `${done.reps ?? '-'} reps · ${done.load ?? '-'}kg` : '—'}
-                </Text>
-              ) : done ? (
-                <View style={styles.doneRow}>
-                  {isPR ? <Text style={styles.prBadge}>🏆 PR</Text> : null}
-                  <Text style={styles.doneText}>{done.reps}×{done.load}kg</Text>
-                </View>
-              ) : (
-                <View style={styles.inputsRow}>
-                  <Input
-                    style={styles.smallInput}
-                    keyboardType="numeric"
-                    placeholder={last ? String(last.reps ?? '') : 'reps'}
-                    value={values[s.number]?.reps ?? ''}
-                    onChangeText={(t) => setValues((v) => ({ ...v, [s.number]: { ...v[s.number], reps: t } }))}
-                  />
-                  <Input
-                    style={styles.smallInput}
-                    keyboardType="numeric"
-                    placeholder={last ? String(last.load ?? '') : 'kg'}
-                    value={values[s.number]?.load ?? ''}
-                    onChangeText={(t) => setValues((v) => ({ ...v, [s.number]: { ...v[s.number], load: t } }))}
-                  />
-                  <Pressable onPress={() => handleSave(s.number)} disabled={savingSeries === s.number} style={{ opacity: savingSeries === s.number ? 0.6 : 1 }}>
-                    <LinearGradient colors={gradients.success} style={styles.okButton}>
-                      <Text style={styles.okButtonText}>{savingSeries === s.number ? '…' : '✓'}</Text>
-                    </LinearGradient>
-                  </Pressable>
-                </View>
+              {!readOnly && !done && noteOpenFor === s.number && (
+                <Input
+                  placeholder="Remarque (ex: douleur épaule, tempo lent...)"
+                  value={values[s.number]?.note ?? ''}
+                  onChangeText={(t) => setValues((v) => ({ ...v, [s.number]: { ...v[s.number], note: t } }))}
+                  style={styles.noteInput}
+                />
               )}
+              {done?.notes ? <Text style={styles.doneNote}>💬 {done.notes}</Text> : null}
             </View>
           );
         })}
@@ -400,6 +420,11 @@ const styles = StyleSheet.create({
     width: 40, height: 40, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', ...shadow.card,
   },
   okButtonText: { color: '#08240F', fontWeight: '900', fontSize: fontSize.md },
+  noteToggle: { paddingHorizontal: 4, paddingVertical: 4 },
+  noteToggleText: { fontSize: 16, opacity: 0.4 },
+  noteToggleActive: { opacity: 1 },
+  noteInput: { marginTop: -spacing.xs, marginBottom: spacing.sm },
+  doneNote: { color: colors.warning, fontSize: fontSize.xs, marginTop: -spacing.xs, marginBottom: spacing.sm, marginLeft: 36 },
   deleteExerciseBtn: { paddingVertical: 2, paddingHorizontal: spacing.xs, marginLeft: spacing.xs },
   suggestionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.sm },
   formRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },

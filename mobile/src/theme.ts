@@ -21,8 +21,13 @@ export const colors = {
   success: '#33E28C',
   successSoft: 'rgba(51, 226, 140, 0.14)',
   warning: '#FFA83D',
+  warningSoft: 'rgba(255, 168, 61, 0.14)',
   danger: '#FF3B4E',
   dangerSoft: 'rgba(255, 59, 78, 0.14)',
+  violet: '#B26BFF',
+  violetSoft: 'rgba(178, 107, 255, 0.14)',
+  muted: '#5C5E68',
+  mutedSoft: 'rgba(92, 94, 104, 0.18)',
 
   text: '#FAFAFC',
   textMuted: '#ACAEB8',

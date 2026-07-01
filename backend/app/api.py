@@ -79,8 +79,20 @@ def dashboard():
 
     program = Program.query.filter_by(athlete_id=user.id).order_by(Program.created_at.desc()).first()
     today_session = None
+    week_sessions = []
     if program:
         today_session = next((s for s in program.sessions if s.day_of_week == today.weekday()), None)
+        for s in sorted(program.sessions, key=lambda s: s.day_of_week):
+            last_log = (PerformanceEntry.query.filter_by(athlete_id=user.id, program_session_id=s.id)
+                        .order_by(PerformanceEntry.entry_date.desc()).first())
+            week_sessions.append({
+                'id': s.id,
+                'day_of_week': s.day_of_week,
+                'session_name': s.session_name,
+                'exercise_count': len(s.exercises),
+                'is_today': s.day_of_week == today.weekday(),
+                'last_logged_date': last_log.entry_date.isoformat() if last_log else None,
+            })
 
     objectives = Objective.query.filter_by(athlete_id=user.id).order_by(Objective.created_at.desc()).limit(5).all()
     last_journal = (JournalEntry.query.filter_by(athlete_id=user.id)
@@ -92,6 +104,7 @@ def dashboard():
         'today': today.isoformat(),
         'program': program.to_dict() if program else None,
         'today_session': today_session.to_dict() if today_session else None,
+        'week_sessions': week_sessions,
         'objectives': [o.to_dict() for o in objectives],
         'last_journal': last_journal.to_dict() if last_journal else None,
         'has_logged_today': today_journal is not None,
@@ -732,6 +745,298 @@ def delete_performance(entry_id):
     return jsonify({'ok': True})
 
 
+@api_bp.get('/performance/remarks')
+@login_required
+def performance_remarks():
+    """Liste des remarques (notes) laissees par l'athlete sur ses series,
+    la plus recente en premier. Alimente le tableau "Remarques" cote coach."""
+    athlete_id = _scope_athlete_id(request.args.get('athlete_id'))
+    if athlete_id is None:
+        return jsonify({'error': 'athlete_id requis'}), 400
+    limit = int(request.args.get('limit', 30))
+    entries = (PerformanceEntry.query
+               .filter(PerformanceEntry.athlete_id == athlete_id,
+                       PerformanceEntry.notes.isnot(None), PerformanceEntry.notes != '')
+               .order_by(PerformanceEntry.entry_date.desc(), PerformanceEntry.id.desc())
+               .limit(limit).all())
+    return jsonify([
+        {
+            'date': e.entry_date.isoformat(),
+            'exercise': e.exercise,
+            'series_number': e.series_number,
+            'notes': e.notes,
+        }
+        for e in entries
+    ])
+
+
+# ------------------------------------------------------- POINTS D'ATTENTION -
+# Portage exact de la logique client `attention_panel.js` de l'app web :
+# classification par exercice (Regression / Vue du coach / Stagnation /
+# Progres / Nouveau / Abandonne) en comparant les series de la derniere
+# seance loggee sur deux semaines A et B (offsets en semaines depuis
+# aujourd'hui, 0 = semaine courante).
+
+def _week_bounds(offset):
+    monday = _week_start(date.today())
+    start = monday - timedelta(days=7 * offset)
+    end = start + timedelta(days=6)
+    return start, end
+
+
+def _week_label(offset):
+    return 'Cette sem.' if offset == 0 else f'S-{offset}'
+
+
+def _series_by_exercise(athlete_id, days=180):
+    cutoff = date.today() - timedelta(days=days)
+    entries = (PerformanceEntry.query
+               .filter(PerformanceEntry.athlete_id == athlete_id, PerformanceEntry.entry_date >= cutoff)
+               .all())
+    result = {}
+    for e in entries:
+        by_date = result.setdefault(e.exercise, {})
+        by_date.setdefault(e.entry_date.isoformat(), []).append({
+            'series_number': e.series_number, 'reps': e.reps, 'load': e.load, 'notes': e.notes,
+        })
+    return result
+
+
+def _last_session_date(series_by_date, start, end):
+    dates = [d for d in series_by_date.keys() if start.isoformat() <= d <= end.isoformat()]
+    return max(dates) if dates else None
+
+
+def _classify_exercise(cur_series, prev_series, cur_date, prev_date):
+    cur_by = {s['series_number']: s for s in cur_series if s.get('series_number') is not None}
+    prev_by = {s['series_number']: s for s in prev_series if s.get('series_number') is not None}
+    all_nums = set(cur_by) | set(prev_by)
+    paired = sorted(n for n in all_nums if n in cur_by and n in prev_by)
+    unpaired_cur = [cur_by[n] for n in all_nums if n in cur_by and n not in prev_by]
+    unpaired_prev = [prev_by[n] for n in all_nums if n in prev_by and n not in cur_by]
+
+    rows = []
+    count_progress = count_regression = count_same = 0
+    cur_tonnage = 0.0
+    prev_tonnage = 0.0
+
+    for num in paired:
+        c, p = cur_by[num], prev_by[num]
+        c_load, p_load = c.get('load'), p.get('load')
+        c_reps, p_reps = c.get('reps'), p.get('reps')
+        row_verdict = 'incomplete'
+        if c_load is not None and p_load is not None and c_reps is not None and p_reps is not None:
+            same_load = c_load == p_load
+            same_reps = c_reps == p_reps
+            cur_tonnage += c_load * c_reps
+            prev_tonnage += p_load * p_reps
+            if c_load < p_load or (same_load and c_reps < p_reps):
+                row_verdict = 'regression'
+                count_regression += 1
+            elif same_load and same_reps:
+                row_verdict = 'same'
+                count_same += 1
+            else:
+                row_verdict = 'progress'
+                count_progress += 1
+        rows.append({
+            'num': num, 'c_load': c_load, 'c_reps': c_reps, 'p_load': p_load, 'p_reps': p_reps,
+            'verdict': row_verdict,
+        })
+
+    tonnage_diff = cur_tonnage - prev_tonnage
+    total_counted = count_progress + count_regression + count_same
+
+    if total_counted == 0:
+        verdict = 'progress'
+    elif count_progress == 0 and count_regression == 0:
+        verdict = 'stagnation'
+    elif count_progress > count_regression:
+        verdict = 'review' if tonnage_diff < 0 else 'progress'
+    elif count_regression > count_progress:
+        verdict = 'review' if tonnage_diff > 0 else 'regression'
+    elif tonnage_diff > 0:
+        verdict = 'progress'
+    elif tonnage_diff < 0:
+        verdict = 'regression'
+    else:
+        verdict = 'stagnation'
+
+    return {
+        'verdict': verdict,
+        'cur_date': cur_date,
+        'prev_date': prev_date,
+        'rows': rows,
+        'unpaired': {'cur': unpaired_cur, 'prev': unpaired_prev},
+        'stats': {
+            'count_progress': count_progress, 'count_regression': count_regression, 'count_same': count_same,
+            'cur_tonnage': round(cur_tonnage, 1), 'prev_tonnage': round(prev_tonnage, 1),
+            'tonnage_diff': round(tonnage_diff, 1),
+        },
+    }
+
+
+def _analyse_attention(athlete_id, week_a_offset, week_b_offset):
+    series_by_ex = _series_by_exercise(athlete_id)
+    a_start, a_end = _week_bounds(week_a_offset)
+    b_start, b_end = _week_bounds(week_b_offset)
+
+    buckets = {'regression': [], 'review': [], 'stagnation': [], 'progress': [], 'new': [], 'abandoned': []}
+    for ex_name, series_by_date in series_by_ex.items():
+        cur_date = _last_session_date(series_by_date, a_start, a_end)
+        prev_date = _last_session_date(series_by_date, b_start, b_end)
+        if not cur_date and not prev_date:
+            continue
+        if cur_date and not prev_date:
+            buckets['new'].append({'name': ex_name, 'detail': None})
+            continue
+        if not cur_date and prev_date:
+            buckets['abandoned'].append({'name': ex_name, 'detail': None})
+            continue
+        detail = _classify_exercise(series_by_date[cur_date], series_by_date[prev_date], cur_date, prev_date)
+        buckets[detail['verdict']].append({'name': ex_name, 'detail': detail})
+
+    for key in buckets:
+        buckets[key].sort(key=lambda item: item['name'])
+    return buckets
+
+
+@api_bp.get('/coach/attention-panel')
+@login_required
+def attention_panel():
+    athlete_id = _scope_athlete_id(request.args.get('athlete_id'))
+    if athlete_id is None:
+        return jsonify({'error': 'athlete_id requis'}), 400
+    week_a = int(request.args.get('week_a', 0))
+    week_b = int(request.args.get('week_b', 1))
+
+    buckets = _analyse_attention(athlete_id, week_a, week_b)
+
+    a_start, a_end = _week_bounds(week_a)
+    b_start, b_end = _week_bounds(week_b)
+    weight_a = _avg([j.weight for j in JournalEntry.query.filter(
+        JournalEntry.athlete_id == athlete_id, JournalEntry.entry_date >= a_start, JournalEntry.entry_date <= a_end).all()])
+    weight_b = _avg([j.weight for j in JournalEntry.query.filter(
+        JournalEntry.athlete_id == athlete_id, JournalEntry.entry_date >= b_start, JournalEntry.entry_date <= b_end).all()])
+
+    return jsonify({
+        'week_a': {'offset': week_a, 'label': _week_label(week_a), 'start': a_start.isoformat(), 'end': a_end.isoformat()},
+        'week_b': {'offset': week_b, 'label': _week_label(week_b), 'start': b_start.isoformat(), 'end': b_end.isoformat()},
+        'body_weight': {'current': weight_a, 'previous': weight_b},
+        'buckets': buckets,
+    })
+
+
+def _health_metrics_for_range(athlete_id, start, end):
+    journal = (JournalEntry.query
+               .filter(JournalEntry.athlete_id == athlete_id, JournalEntry.entry_date >= start, JournalEntry.entry_date <= end)
+               .all())
+    return {
+        'weight': _avg([j.weight for j in journal]),
+        'kcals': _avg([j.kcals for j in journal]),
+        'water_ml': _avg([j.water_ml for j in journal]),
+        'sleep_hours': _avg([j.sleep_hours for j in journal]),
+    }
+
+
+def _muscle_tonnage_for_range(athlete_id, start, end, muscle_by_name):
+    perf = (PerformanceEntry.query
+            .filter(PerformanceEntry.athlete_id == athlete_id, PerformanceEntry.entry_date >= start,
+                    PerformanceEntry.entry_date <= end)
+            .all())
+    muscle_totals, exercise_totals = {}, {}
+    for e in perf:
+        if not e.reps or not e.load:
+            continue
+        muscle = muscle_by_name.get(e.exercise, 'Autre') or 'Autre'
+        tonnage = e.reps * e.load
+        muscle_totals[muscle] = muscle_totals.get(muscle, 0) + tonnage
+        exercise_totals.setdefault(muscle, {})
+        exercise_totals[muscle][e.exercise] = exercise_totals[muscle].get(e.exercise, 0) + tonnage
+    return muscle_totals, exercise_totals
+
+
+def _build_muscle_rows(muscle_a, ex_a, muscle_b, ex_b):
+    all_muscles = sorted(set(muscle_a) | set(muscle_b))
+    rows = []
+    for m in all_muscles:
+        cur = round(muscle_a.get(m, 0), 1)
+        prev = round(muscle_b.get(m, 0), 1)
+        diff = round(cur - prev, 1)
+        exercises = sorted(set(ex_a.get(m, {})) | set(ex_b.get(m, {})))
+        ex_detail = []
+        for exn in exercises:
+            ecur = round(ex_a.get(m, {}).get(exn, 0), 1)
+            eprev = round(ex_b.get(m, {}).get(exn, 0), 1)
+            if eprev:
+                pct = round((ecur - eprev) / eprev * 100)
+            else:
+                pct = 100 if ecur else 0
+            ex_detail.append({'name': exn, 'current': ecur, 'previous': eprev, 'diff_pct': pct})
+        rows.append({'muscle': m, 'current': cur, 'previous': prev, 'diff': diff, 'exercises': ex_detail})
+    return rows
+
+
+@api_bp.get('/stats/weekly-comparison')
+@login_required
+def stats_weekly_comparison():
+    """Comparaison hebdomadaire complete (sante + tonnage par groupe
+    musculaire avec detail par exercice) entre deux semaines A et B."""
+    athlete_id = _scope_athlete_id(request.args.get('athlete_id'))
+    if athlete_id is None:
+        return jsonify({'error': 'athlete_id requis'}), 400
+    week_a = int(request.args.get('week_a', 0))
+    week_b = int(request.args.get('week_b', 1))
+    a_start, a_end = _week_bounds(week_a)
+    b_start, b_end = _week_bounds(week_b)
+
+    health_a = _health_metrics_for_range(athlete_id, a_start, a_end)
+    health_b = _health_metrics_for_range(athlete_id, b_start, b_end)
+
+    muscle_by_name = {e.name: e.muscle_group for e in Exercise.query.all()}
+    muscle_a, ex_a = _muscle_tonnage_for_range(athlete_id, a_start, a_end, muscle_by_name)
+    muscle_b, ex_b = _muscle_tonnage_for_range(athlete_id, b_start, b_end, muscle_by_name)
+    muscle_rows = _build_muscle_rows(muscle_a, ex_a, muscle_b, ex_b)
+
+    def health_row(key, label):
+        cur_v, prev_v = health_a[key], health_b[key]
+        diff = round(cur_v - prev_v, 1) if cur_v is not None and prev_v is not None else None
+        return {'key': key, 'label': label, 'current': cur_v, 'previous': prev_v, 'diff': diff}
+
+    health_rows = [
+        health_row('weight', 'Poids (kg)'),
+        health_row('kcals', 'Kcals'),
+        health_row('water_ml', 'Eau (ml)'),
+        health_row('sleep_hours', 'Sommeil (h)'),
+    ]
+
+    return jsonify({
+        'week_a': {'offset': week_a, 'label': _week_label(week_a), 'start': a_start.isoformat(), 'end': a_end.isoformat()},
+        'week_b': {'offset': week_b, 'label': _week_label(week_b), 'start': b_start.isoformat(), 'end': b_end.isoformat()},
+        'health': health_rows,
+        'muscles': muscle_rows,
+    })
+
+
+@api_bp.get('/stats/regularity')
+@login_required
+def stats_regularity():
+    """Nombre de seances (dates distinctes avec au moins une performance
+    loggee) sur les N dernieres semaines (4 par defaut)."""
+    athlete_id = _scope_athlete_id(request.args.get('athlete_id'))
+    if athlete_id is None:
+        return jsonify({'error': 'athlete_id requis'}), 400
+    weeks = int(request.args.get('weeks', 4))
+    out = []
+    for offset in range(weeks - 1, -1, -1):
+        start, end = _week_bounds(offset)
+        dates = {e.entry_date for e in PerformanceEntry.query.filter(
+            PerformanceEntry.athlete_id == athlete_id,
+            PerformanceEntry.entry_date >= start, PerformanceEntry.entry_date <= end).all()}
+        out.append({'offset': offset, 'label': _week_label(offset), 'start': start.isoformat(), 'sessions': len(dates)})
+    return jsonify(out)
+
+
 # -------------------------------------------------------------- FOOD BANK -
 
 @api_bp.get('/foods')
@@ -985,6 +1290,10 @@ def weekly_bilan():
     previous_start = current_start - timedelta(days=7)
 
     athletes = User.query.filter_by(role='athlete').order_by(User.username).all()
+    muscle_by_name = {e.name: e.muscle_group for e in Exercise.query.all()}
+    current_end = current_start + timedelta(days=6)
+    previous_end = previous_start + timedelta(days=6)
+
     result = []
     for a in athletes:
         current = _weekly_metrics(a.id, current_start)
@@ -998,12 +1307,19 @@ def weekly_bilan():
         marking = WeeklyBilanMarking.query.filter_by(athlete_id=a.id, week_start=current_start).first()
         objectives = Objective.query.filter_by(athlete_id=a.id).order_by(Objective.created_at.desc()).limit(5).all()
 
+        muscle_a, ex_a = _muscle_tonnage_for_range(a.id, current_start, current_end, muscle_by_name)
+        muscle_b, ex_b = _muscle_tonnage_for_range(a.id, previous_start, previous_end, muscle_by_name)
+        muscle_rows = _build_muscle_rows(muscle_a, ex_a, muscle_b, ex_b)
+        attention = _analyse_attention(a.id, 0, 1)
+
         result.append({
             'athlete': a.to_dict(),
             'week_start': current_start.isoformat(),
             'done': bool(marking and marking.done),
             'metrics': metrics,
             'objectives': [o.to_dict() for o in objectives],
+            'muscles': muscle_rows,
+            'attention': attention,
         })
 
     return jsonify(result)

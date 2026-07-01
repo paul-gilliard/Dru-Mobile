@@ -151,11 +151,21 @@ export interface CoachDashboardDTO {
   athletes: AthleteSummaryDTO[];
 }
 
+export interface WeekSessionDTO {
+  id: number;
+  day_of_week: number;
+  session_name: string | null;
+  exercise_count: number;
+  is_today: boolean;
+  last_logged_date: string | null;
+}
+
 export interface AthleteDashboardDTO {
   role: 'athlete';
   today: string;
   program: ProgramDTO | null;
   today_session: ProgramSessionDTO | null;
+  week_sessions: WeekSessionDTO[];
   objectives: ObjectiveDTO[];
   last_journal: JournalEntryDTO | null;
   has_logged_today: boolean;
@@ -184,10 +194,99 @@ export interface WeeklyMetricDTO {
   diff: number | null;
 }
 
+export interface MuscleComparisonExerciseDTO {
+  name: string;
+  current: number;
+  previous: number;
+  diff_pct: number;
+}
+
+export interface MuscleComparisonRowDTO {
+  muscle: string;
+  current: number;
+  previous: number;
+  diff: number;
+  exercises: MuscleComparisonExerciseDTO[];
+}
+
+export type AttentionVerdict = 'regression' | 'review' | 'stagnation' | 'progress';
+
+export interface AttentionSeriesRowDTO {
+  num: number;
+  c_load: number | null;
+  c_reps: number | null;
+  p_load: number | null;
+  p_reps: number | null;
+  verdict: 'regression' | 'same' | 'progress' | 'incomplete';
+}
+
+export interface AttentionDetailDTO {
+  verdict: AttentionVerdict;
+  cur_date: string;
+  prev_date: string;
+  rows: AttentionSeriesRowDTO[];
+  unpaired: { cur: { series_number: number; reps: number | null; load: number | null }[]; prev: { series_number: number; reps: number | null; load: number | null }[] };
+  stats: {
+    count_progress: number; count_regression: number; count_same: number;
+    cur_tonnage: number; prev_tonnage: number; tonnage_diff: number;
+  };
+}
+
+export interface AttentionItemDTO {
+  name: string;
+  detail: AttentionDetailDTO | null;
+}
+
+export interface AttentionBucketsDTO {
+  regression: AttentionItemDTO[];
+  review: AttentionItemDTO[];
+  stagnation: AttentionItemDTO[];
+  progress: AttentionItemDTO[];
+  new: AttentionItemDTO[];
+  abandoned: AttentionItemDTO[];
+}
+
+export interface WeekRefDTO {
+  offset: number;
+  label: string;
+  start: string;
+  end?: string;
+}
+
+export interface AttentionPanelDTO {
+  week_a: WeekRefDTO;
+  week_b: WeekRefDTO;
+  body_weight: { current: number | null; previous: number | null };
+  buckets: AttentionBucketsDTO;
+}
+
+export interface WeeklyComparisonDTO {
+  week_a: WeekRefDTO;
+  week_b: WeekRefDTO;
+  health: WeeklyMetricDTO[];
+  muscles: MuscleComparisonRowDTO[];
+}
+
+export interface RegularityPointDTO {
+  offset: number;
+  label: string;
+  start: string;
+  sessions: number;
+}
+
+export interface RemarkDTO {
+  date: string;
+  exercise: string;
+  series_number: number | null;
+  notes: string;
+}
+
 export interface WeeklyBilanEntryDTO {
   athlete: UserDTO;
   week_start: string;
   done: boolean;
   metrics: WeeklyMetricDTO[];
   objectives: ObjectiveDTO[];
+  muscles: MuscleComparisonRowDTO[];
+  attention: AttentionBucketsDTO;
 }

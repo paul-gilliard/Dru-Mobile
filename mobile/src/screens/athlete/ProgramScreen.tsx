@@ -2,6 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../context/AuthContext';
 import { useAthleteScope } from '../../context/AthleteScopeContext';
 import {
@@ -11,7 +12,7 @@ import {
 import { apiErrorMessage } from '../../api/client';
 import { ProgramDTO } from '../../api/types';
 import { Badge, Button, Card, EmptyState, ErrorView, Input, LoadingView, SectionTitle } from '../../components/ui';
-import { colors, fontSize, muscleColors, radius, spacing } from '../../theme';
+import { colors, fontSize, gradients, muscleColors, radius, spacing } from '../../theme';
 import { AthleteStackParamList } from '../../navigation/types';
 import { DAY_NAMES, DAY_NAMES_SHORT, jsWeekdayToBackend } from '../../utils/format';
 
@@ -271,6 +272,17 @@ function ProgramCard({
                     </Pressable>
                   </View>
                 )
+              ) : session.exercises.length > 0 ? (
+                <Pressable onPress={() => onPressSession(session.id)} style={styles.startBtnWrap}>
+                  <LinearGradient
+                    colors={isToday ? gradients.primary : [colors.surfaceHi, colors.surfaceHi]}
+                    style={styles.startBtn}
+                  >
+                    <Text style={[styles.startBtnText, !isToday && { color: colors.text }]}>
+                      {isToday ? '🔥 Démarrer' : 'Logger ›'}
+                    </Text>
+                  </LinearGradient>
+                </Pressable>
               ) : (
                 <Text style={styles.chevron}>›</Text>
               )}
@@ -368,6 +380,9 @@ const styles = StyleSheet.create({
   sessionName: { color: colors.text, fontSize: fontSize.md, fontWeight: '700', marginBottom: spacing.sm },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   chevron: { color: colors.textFaint, fontSize: 24 },
+  startBtnWrap: { marginLeft: spacing.xs },
+  startBtn: { paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radius.pill },
+  startBtnText: { color: '#fff', fontWeight: '800', fontSize: fontSize.xs },
   mutedText: { color: colors.textMuted },
   emptySession: { color: colors.textFaint, fontSize: fontSize.xs, fontStyle: 'italic' },
   dayPicker: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.md },

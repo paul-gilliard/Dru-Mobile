@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -10,7 +10,7 @@ import { AthleteDashboardDTO } from '../../api/types';
 import { Badge, Button, Card, EmptyState, ErrorView, LoadingView, SectionTitle } from '../../components/ui';
 import { colors, fontSize, gradients, muscleColors, radius, shadow, spacing } from '../../theme';
 import { AthleteStackParamList } from '../../navigation/types';
-import { DAY_NAMES } from '../../utils/format';
+import { DAY_NAMES, DAY_NAMES_SHORT } from '../../utils/format';
 
 type Nav = NativeStackNavigationProp<AthleteStackParamList, 'Home'>;
 
@@ -80,6 +80,39 @@ export default function HomeScreen() {
           <Text style={styles.restEmoji}>😴</Text>
           <Text style={styles.restTitle}>Repos aujourd'hui</Text>
           <Text style={styles.mutedText}>Pas de séance programmée. Récupération = progression 🧘</Text>
+        </Card>
+      )}
+
+      {data.week_sessions.length > 0 && (
+        <Card style={{ marginTop: spacing.lg }}>
+          <SectionTitle icon="🗓️">Ma semaine</SectionTitle>
+          {data.week_sessions.map((s) => (
+            <Pressable
+              key={s.id}
+              onPress={() => navigation.navigate('SessionDetail', { sessionId: s.id })}
+              style={[styles.weekRow, s.is_today && styles.weekRowToday]}
+            >
+              <View style={styles.weekDayBadge}>
+                <Text style={[styles.weekDayBadgeText, s.is_today && { color: colors.primary }]}>
+                  {DAY_NAMES_SHORT[s.day_of_week]}
+                </Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.weekSessionName}>{s.session_name ?? 'Séance'}</Text>
+                <Text style={styles.mutedText}>
+                  {s.exercise_count} exercice{s.exercise_count > 1 ? 's' : ''}
+                  {s.last_logged_date ? ` · dernier log le ${s.last_logged_date.split('-').reverse().join('/')}` : ' · jamais loggée'}
+                </Text>
+              </View>
+              {s.is_today ? (
+                <View style={styles.weekCta}>
+                  <Text style={styles.weekCtaText}>Démarrer ›</Text>
+                </View>
+              ) : (
+                <Text style={styles.chevronMuted}>Logger ›</Text>
+              )}
+            </Pressable>
+          ))}
         </Card>
       )}
 
@@ -180,4 +213,18 @@ const styles = StyleSheet.create({
   objectiveTitle: { color: colors.text, fontWeight: '700' },
   programRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   sessionName: { color: colors.text, fontSize: fontSize.md, fontWeight: '700' },
+  weekRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.md,
+    borderTopWidth: 1, borderTopColor: colors.border,
+  },
+  weekRowToday: { backgroundColor: colors.primarySoft, marginHorizontal: -spacing.lg, paddingHorizontal: spacing.lg, borderTopColor: 'transparent' },
+  weekDayBadge: {
+    width: 40, height: 40, borderRadius: radius.md, backgroundColor: colors.surfaceHi,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  weekDayBadgeText: { color: colors.textMuted, fontWeight: '800', fontSize: fontSize.xs, textTransform: 'uppercase' },
+  weekSessionName: { color: colors.text, fontWeight: '700', fontSize: fontSize.sm },
+  weekCta: { backgroundColor: colors.primary, paddingVertical: spacing.xs, paddingHorizontal: spacing.sm, borderRadius: radius.pill },
+  weekCtaText: { color: '#fff', fontWeight: '800', fontSize: fontSize.xs },
+  chevronMuted: { color: colors.textFaint, fontWeight: '700', fontSize: fontSize.xs },
 });

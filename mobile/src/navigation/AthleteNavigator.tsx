@@ -12,10 +12,6 @@ import SessionDetailScreen from '../screens/athlete/SessionDetailScreen';
 import JournalScreen from '../screens/athlete/JournalScreen';
 import NutritionScreen from '../screens/athlete/NutritionScreen';
 import MoreScreen from '../screens/athlete/MoreScreen';
-import PerformanceScreen from '../screens/athlete/PerformanceScreen';
-import AvailabilityScreen from '../screens/athlete/AvailabilityScreen';
-import ObjectivesScreen from '../screens/athlete/ObjectivesScreen';
-import StatsScreen from '../screens/athlete/StatsScreen';
 
 const Stack = createNativeStackNavigator<AthleteStackParamList>();
 const Tab = createBottomTabNavigator();
@@ -67,10 +63,6 @@ function MoreStack() {
   return (
     <Stack.Navigator screenOptions={stackScreenOptions}>
       <Stack.Screen name="More" component={MoreScreen} options={{ title: 'Plus' }} />
-      <Stack.Screen name="Performance" component={PerformanceScreen} options={{ title: 'Performances' }} />
-      <Stack.Screen name="Availability" component={AvailabilityScreen} options={{ title: 'Disponibilités' }} />
-      <Stack.Screen name="Objectives" component={ObjectivesScreen} options={{ title: 'Objectifs' }} />
-      <Stack.Screen name="Stats" component={StatsScreen} options={{ title: 'Statistiques' }} />
     </Stack.Navigator>
   );
 }

@@ -3,10 +3,13 @@ import { Dimensions, RefreshControl, ScrollView, StyleSheet, Text, View } from '
 import { useFocusEffect } from '@react-navigation/native';
 import { BarChart, LineChart } from 'react-native-chart-kit';
 import { useAthleteScope } from '../../context/AthleteScopeContext';
-import { getJournalTrend, getTonnageByMuscle } from '../../api/resources';
+import { getJournalTrend, getRegularity, getTonnageByMuscle } from '../../api/resources';
 import { apiErrorMessage } from '../../api/client';
-import { JournalTrendDTO, TonnageByMuscleDTO } from '../../api/types';
+import { JournalTrendDTO, RegularityPointDTO, TonnageByMuscleDTO } from '../../api/types';
 import { Card, EmptyState, ErrorView, LoadingView, SectionTitle, StatBlock } from '../../components/ui';
+import AttentionPanel from '../../components/AttentionPanel';
+import WeeklyComparisonCard from '../../components/WeeklyComparisonCard';
+import RemarksList from '../../components/RemarksList';
 import { colors, fontSize, muscleColors, spacing } from '../../theme';
 
 const screenWidth = Dimensions.get('window').width - spacing.lg * 2 - spacing.lg * 2;
@@ -28,6 +31,8 @@ export default function StatsScreen() {
 
   const [tonnage, setTonnage] = useState<TonnageByMuscleDTO | null>(null);
   const [journalTrend, setJournalTrend] = useState<JournalTrendDTO[]>([]);
+  const [regularity, setRegularity] = useState<RegularityPointDTO[]>([]);
+  const [weeks, setWeeks] = useState<{ a: number; b: number }>({ a: 0, b: 1 });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,12 +40,14 @@ export default function StatsScreen() {
   const load = useCallback(async () => {
     try {
       setError(null);
-      const [t, j] = await Promise.all([
+      const [t, j, r] = await Promise.all([
         getTonnageByMuscle(athleteId, 30),
         getJournalTrend(athleteId, 30),
+        getRegularity(athleteId, 4),
       ]);
       setTonnage(t);
       setJournalTrend(j);
+      setRegularity(r);
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {
@@ -81,6 +88,24 @@ export default function StatsScreen() {
           />
         </Card>
       </View>
+
+      {regularity.length > 0 && (
+        <Card style={{ marginBottom: spacing.lg }}>
+          <SectionTitle icon="📅">Régularité — séances par semaine</SectionTitle>
+          <View style={styles.regularityRow}>
+            {regularity.map((r) => (
+              <View key={r.offset} style={styles.regularityPill}>
+                <Text style={styles.regularityValue}>{r.sessions}</Text>
+                <Text style={styles.regularityLabel}>{r.label}</Text>
+              </View>
+            ))}
+          </View>
+        </Card>
+      )}
+
+      <AttentionPanel athleteId={athleteId} onWeeksChange={(a, b) => setWeeks({ a, b })} />
+      <WeeklyComparisonCard athleteId={athleteId} weekA={weeks.a} weekB={weeks.b} />
+      <RemarksList athleteId={athleteId} limit={12} />
 
       <Card style={{ marginBottom: spacing.lg }}>
         <View style={styles.cardHeaderRow}>
@@ -170,4 +195,11 @@ const styles = StyleSheet.create({
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   dot: { width: 8, height: 8, borderRadius: 4 },
   legendText: { color: colors.textMuted, fontSize: fontSize.xs, fontWeight: '600' },
+  regularityRow: { flexDirection: 'row', gap: spacing.sm },
+  regularityPill: {
+    flex: 1, alignItems: 'center', backgroundColor: colors.successSoft, borderRadius: 14,
+    paddingVertical: spacing.md, borderWidth: 1, borderColor: colors.success,
+  },
+  regularityValue: { color: colors.success, fontWeight: '900', fontSize: fontSize.xl },
+  regularityLabel: { color: colors.textMuted, fontSize: fontSize.xs, fontWeight: '700', marginTop: 2 },
 });
