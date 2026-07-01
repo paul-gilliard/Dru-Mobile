@@ -1,10 +1,13 @@
 import React, { useCallback, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../../context/AuthContext';
 import { useAthleteScope } from '../../context/AthleteScopeContext';
-import { createProgram, createSession, deleteProgram, getProgram, listPrograms } from '../../api/resources';
+import {
+  createProgram, createSession, deleteProgram, deleteSession, duplicateProgram, getProgram,
+  listPrograms, renameProgram, renameSession,
+} from '../../api/resources';
 import { apiErrorMessage } from '../../api/client';
 import { ProgramDTO } from '../../api/types';
 import { Badge, Button, Card, EmptyState, ErrorView, Input, LoadingView, SectionTitle } from '../../components/ui';
@@ -116,6 +119,12 @@ function ProgramCard({
   const [full, setFull] = useState<ProgramDTO>(program);
   const [addingSession, setAddingSession] = useState(false);
   const [savingDay, setSavingDay] = useState<number | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState(program.name);
+  const [busy, setBusy] = useState(false);
+  const [editingSessionId, setEditingSessionId] = useState<number | null>(null);
+  const [sessionNameDraft, setSessionNameDraft] = useState('');
+  const [recapOpen, setRecapOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -129,6 +138,11 @@ function ProgramCard({
   useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
 
   const usedDays = new Set((full.sessions ?? []).map((s) => s.day_of_week));
+  const sortedSessions = [...(full.sessions ?? [])].sort((a, b) => a.day_of_week - b.day_of_week);
+  const totalExercises = sortedSessions.reduce((acc, s) => acc + s.exercises.length, 0);
+  const totalSeries = sortedSessions.reduce(
+    (acc, s) => acc + s.exercises.reduce((a2, ex) => a2 + (ex.series.length || ex.sets || 3), 0), 0,
+  );
 
   const handleAddDay = async (day: number) => {
     setSavingDay(day);
@@ -143,27 +157,99 @@ function ProgramCard({
     }
   };
 
+  const handleRenameProgram = async () => {
+    if (!nameDraft.trim() || nameDraft.trim() === full.name) { setRenaming(false); return; }
+    setBusy(true);
+    try {
+      await renameProgram(program.id, nameDraft.trim());
+      await refresh();
+    } finally {
+      setBusy(false);
+      setRenaming(false);
+    }
+  };
+
+  const handleDuplicateProgram = async () => {
+    setBusy(true);
+    try {
+      await duplicateProgram(program.id, { name: `${full.name} (copie)` });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRenameSession = async (sessionId: number) => {
+    if (sessionNameDraft.trim()) {
+      await renameSession(sessionId, sessionNameDraft.trim());
+      await refresh();
+    }
+    setEditingSessionId(null);
+  };
+
+  const handleDeleteSession = async (sessionId: number) => {
+    await deleteSession(sessionId);
+    await refresh();
+  };
+
   return (
     <Card style={{ marginBottom: spacing.lg }}>
       <View style={styles.cardHeader}>
-        <SectionTitle style={{ marginBottom: 0, flex: 1 }} icon="🏋️">{full.name}</SectionTitle>
-        {isCoach && <Button title="Suppr." variant="danger" onPress={onDeleteProgram} style={styles.smallBtn} />}
+        {renaming ? (
+          <Input style={{ flex: 1 }} value={nameDraft} onChangeText={setNameDraft} autoFocus onSubmitEditing={handleRenameProgram} />
+        ) : (
+          <Pressable style={{ flex: 1 }} onPress={() => isCoach && setRenaming(true)} disabled={!isCoach}>
+            <SectionTitle style={{ marginBottom: 0 }} icon="🏋️">{full.name}{isCoach ? ' ✎' : ''}</SectionTitle>
+          </Pressable>
+        )}
+        {!renaming && (
+          <View style={styles.headerActions}>
+            <Button title="Récap" variant="accent" onPress={() => setRecapOpen(true)} style={styles.smallBtn} />
+            {isCoach && (
+              <>
+                <Button title="Dupl." variant="secondary" onPress={handleDuplicateProgram} loading={busy} style={styles.smallBtn} />
+                <Button title="Suppr." variant="danger" onPress={onDeleteProgram} style={styles.smallBtn} />
+              </>
+            )}
+          </View>
+        )}
+        {renaming && <Button title="OK" onPress={handleRenameProgram} loading={busy} style={styles.smallBtn} />}
       </View>
+
+      {(full.sessions ?? []).length > 0 && (
+        <View style={styles.statsRow}>
+          <StatPill value={totalExercises} label="Exercices" />
+          <StatPill value={totalSeries} label="Séries" />
+          <StatPill value={sortedSessions.length} label="Séances/sem." />
+        </View>
+      )}
+
+      <RecapModal visible={recapOpen} onClose={() => setRecapOpen(false)} programName={full.name} sessions={sortedSessions} />
 
       {(full.sessions ?? []).length === 0 ? (
         <Text style={styles.mutedText}>Aucune séance dans ce programme.</Text>
       ) : (
         (full.sessions ?? []).map((session) => {
           const isToday = session.day_of_week === TODAY_DOW;
+          const isEditing = editingSessionId === session.id;
           return (
-            <Pressable key={session.id} style={[styles.sessionRow, isToday && styles.sessionRowToday]} onPress={() => onPressSession(session.id)}>
+            <View key={session.id} style={[styles.sessionRow, isToday && styles.sessionRowToday]}>
               <View style={[styles.dayBar, isToday && styles.dayBarToday]} />
-              <View style={{ flex: 1 }}>
+              <Pressable style={{ flex: 1 }} onPress={() => !isEditing && onPressSession(session.id)}>
                 <View style={styles.dayLabelRow}>
                   <Text style={[styles.dayLabel, isToday && styles.dayLabelToday]}>{DAY_NAMES[session.day_of_week]}</Text>
                   {isToday && <Badge label="AUJOURD'HUI" color={colors.primary} />}
                 </View>
-                <Text style={styles.sessionName}>{session.session_name}</Text>
+                {isEditing ? (
+                  <Input
+                    value={sessionNameDraft}
+                    onChangeText={setSessionNameDraft}
+                    autoFocus
+                    onSubmitEditing={() => handleRenameSession(session.id)}
+                    style={{ marginTop: spacing.xs }}
+                  />
+                ) : (
+                  <Text style={styles.sessionName}>{session.session_name}</Text>
+                )}
                 <View style={styles.chipRow}>
                   {session.exercises.slice(0, 4).map((ex) => (
                     <Badge key={ex.id} label={ex.name} color={muscleColors[ex.muscle ?? ''] ?? colors.primary} />
@@ -171,9 +257,24 @@ function ProgramCard({
                   {session.exercises.length > 4 ? <Badge label={`+${session.exercises.length - 4}`} color={colors.textMuted} /> : null}
                   {session.exercises.length === 0 ? <Text style={styles.emptySession}>Aucun exercice — appuyer pour ajouter</Text> : null}
                 </View>
-              </View>
-              <Text style={styles.chevron}>›</Text>
-            </Pressable>
+              </Pressable>
+              {isCoach ? (
+                isEditing ? (
+                  <Button title="OK" onPress={() => handleRenameSession(session.id)} style={styles.smallBtn} />
+                ) : (
+                  <View style={styles.sessionActions}>
+                    <Pressable onPress={() => { setSessionNameDraft(session.session_name ?? ''); setEditingSessionId(session.id); }}>
+                      <Text style={styles.sessionActionIcon}>✎</Text>
+                    </Pressable>
+                    <Pressable onPress={() => handleDeleteSession(session.id)}>
+                      <Text style={styles.sessionActionIcon}>🗑️</Text>
+                    </Pressable>
+                  </View>
+                )
+              ) : (
+                <Text style={styles.chevron}>›</Text>
+              )}
+            </View>
           );
         })
       )}
@@ -200,13 +301,60 @@ function ProgramCard({
   );
 }
 
+function StatPill({ value, label }: { value: number; label: string }) {
+  return (
+    <View style={styles.statPill}>
+      <Text style={styles.statPillValue}>{value}</Text>
+      <Text style={styles.statPillLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function RecapModal({
+  visible, onClose, programName, sessions,
+}: { visible: boolean; onClose: () => void; programName: string; sessions: import('../../api/types').ProgramSessionDTO[] }) {
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalCard}>
+          <ScrollView>
+            <Text style={styles.modalTitle}>📋 Récapitulatif — {programName}</Text>
+            {sessions.length === 0 ? (
+              <Text style={styles.mutedText}>Aucune séance.</Text>
+            ) : (
+              sessions.map((session) => (
+                <View key={session.id} style={{ marginBottom: spacing.md }}>
+                  <Text style={styles.modalDay}>{DAY_NAMES[session.day_of_week]}{session.session_name ? ` — ${session.session_name}` : ''}</Text>
+                  {session.exercises.length === 0 ? (
+                    <Text style={styles.modalEmptyDay}>Repos / aucun exercice</Text>
+                  ) : (
+                    session.exercises.map((ex) => (
+                      <Text key={ex.id} style={styles.modalExerciseLine}>
+                        • {ex.name} <Text style={styles.modalMuscle}>({ex.muscle ?? '-'})</Text> {ex.sets ?? ex.series.length ?? 3}S
+                      </Text>
+                    ))
+                  )}
+                </View>
+              ))
+            )}
+          </ScrollView>
+          <Button title="Fermer" onPress={onClose} style={{ marginTop: spacing.md }} />
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.lg, paddingBottom: spacing.xxl },
   row: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center' },
   createBtn: { paddingHorizontal: spacing.lg },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.xs },
+  cardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.xs, gap: spacing.xs },
+  headerActions: { flexDirection: 'row', gap: spacing.xs },
   smallBtn: { paddingVertical: spacing.xs, paddingHorizontal: spacing.sm },
+  sessionActions: { flexDirection: 'row', gap: spacing.sm, paddingLeft: spacing.xs },
+  sessionActionIcon: { fontSize: 16, padding: spacing.xs },
   sessionRow: {
     flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.md,
     borderTopWidth: 1, borderTopColor: colors.border, gap: spacing.md,
@@ -229,4 +377,20 @@ const styles = StyleSheet.create({
   },
   dayChipDisabled: { backgroundColor: colors.surfaceAlt, opacity: 0.4 },
   dayChipText: { color: '#fff', fontWeight: '700', fontSize: fontSize.sm },
+  statsRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
+  statPill: {
+    flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md,
+    paddingVertical: spacing.sm, alignItems: 'center', backgroundColor: colors.surfaceAlt,
+  },
+  statPillValue: { color: colors.primary, fontWeight: '900', fontSize: fontSize.lg },
+  statPillLabel: { color: colors.textMuted, fontSize: fontSize.xs, fontWeight: '700', marginTop: 2, textTransform: 'uppercase' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: spacing.lg },
+  modalCard: {
+    backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, maxHeight: '80%', borderWidth: 1, borderColor: colors.border,
+  },
+  modalTitle: { color: colors.text, fontSize: fontSize.lg, fontWeight: '900', marginBottom: spacing.md },
+  modalDay: { color: colors.primary, fontWeight: '800', fontSize: fontSize.sm, marginBottom: spacing.xs, textTransform: 'uppercase' },
+  modalEmptyDay: { color: colors.textFaint, fontSize: fontSize.xs, fontStyle: 'italic' },
+  modalExerciseLine: { color: colors.textMuted, fontSize: fontSize.sm, marginBottom: 2 },
+  modalMuscle: { color: colors.textFaint, fontSize: fontSize.xs },
 });

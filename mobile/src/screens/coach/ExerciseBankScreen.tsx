@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { createExerciseBank, deleteExerciseBank, listExerciseBank } from '../../api/resources';
+import { createExerciseBank, deleteExerciseBank, listExerciseBank, updateExerciseBank } from '../../api/resources';
 import { apiErrorMessage } from '../../api/client';
 import { ExerciseBankDTO } from '../../api/types';
 import { Badge, Button, Card, EmptyState, ErrorView, Input, LoadingView, SectionTitle } from '../../components/ui';
@@ -16,6 +16,7 @@ export default function ExerciseBankScreen() {
   const [name, setName] = useState('');
   const [muscle, setMuscle] = useState<string>('');
   const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -96,15 +97,62 @@ export default function ExerciseBankScreen() {
               <Text style={[styles.muscleTitle, { color: muscleColors[mg] ?? colors.text }]}>{mg}</Text>
             </View>
             {list.map((ex) => (
-              <Card key={ex.id} style={styles.exerciseRow}>
-                <Text style={styles.exerciseName}>{ex.name}</Text>
-                <Button title="✕" variant="ghost" onPress={() => handleDelete(ex.id)} style={styles.deleteBtn} />
-              </Card>
+              editingId === ex.id ? (
+                <EditExerciseBankRow
+                  key={ex.id}
+                  exercise={ex}
+                  muscleGroups={muscleGroups}
+                  onCancel={() => setEditingId(null)}
+                  onSaved={() => { setEditingId(null); load(); }}
+                />
+              ) : (
+                <Card key={ex.id} style={styles.exerciseRow}>
+                  <Text style={styles.exerciseName}>{ex.name}</Text>
+                  <Button title="✎" variant="ghost" onPress={() => setEditingId(ex.id)} style={styles.deleteBtn} />
+                  <Button title="✕" variant="ghost" onPress={() => handleDelete(ex.id)} style={styles.deleteBtn} />
+                </Card>
+              )
             ))}
           </View>
         ))
       )}
     </ScrollView>
+  );
+}
+
+function EditExerciseBankRow({
+  exercise, muscleGroups, onCancel, onSaved,
+}: { exercise: ExerciseBankDTO; muscleGroups: string[]; onCancel: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(exercise.name);
+  const [muscle, setMuscle] = useState(exercise.muscle_group);
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!name.trim()) return;
+    setSaving(true);
+    try {
+      await updateExerciseBank(exercise.id, { name: name.trim(), muscle_group: muscle });
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card style={{ marginBottom: spacing.sm }}>
+      <Input value={name} onChangeText={setName} placeholder="Nom de l'exercice" />
+      <View style={styles.muscleRow}>
+        {muscleGroups.map((mg) => (
+          <Pressable key={mg} onPress={() => setMuscle(mg)}>
+            <Badge label={mg} color={muscle === mg ? (muscleColors[mg] ?? colors.primary) : colors.textFaint} />
+          </Pressable>
+        ))}
+      </View>
+      <View style={[styles.editActions]}>
+        <Button title="Annuler" variant="ghost" onPress={onCancel} style={{ flex: 1 }} />
+        <Button title="Enregistrer" onPress={handleSave} loading={saving} style={{ flex: 1 }} />
+      </View>
+    </Card>
   );
 }
 
@@ -118,4 +166,5 @@ const styles = StyleSheet.create({
   exerciseRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.sm, paddingVertical: spacing.sm },
   exerciseName: { color: colors.text, flex: 1, fontWeight: '600' },
   deleteBtn: { paddingVertical: 4, paddingHorizontal: spacing.sm },
+  editActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
 });

@@ -175,3 +175,19 @@ export interface JournalTrendDTO {
   sleep_hours: number | null;
   energy: number | null;
 }
+
+export interface WeeklyMetricDTO {
+  key: string;
+  label: string;
+  current: number | null;
+  previous: number | null;
+  diff: number | null;
+}
+
+export interface WeeklyBilanEntryDTO {
+  athlete: UserDTO;
+  week_start: string;
+  done: boolean;
+  metrics: WeeklyMetricDTO[];
+  objectives: ObjectiveDTO[];
+}

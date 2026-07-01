@@ -7,7 +7,7 @@ from app.auth import generate_token, login_required, coach_required
 from app.models import (
     User, Availability, Program, ProgramSession, ExerciseEntry,
     JournalEntry, PerformanceEntry, Exercise, Food, MealPlan, MealEntry,
-    Objective, MUSCLE_GROUPS,
+    Objective, WeeklyBilanMarking, MUSCLE_GROUPS,
 )
 
 api_bp = Blueprint('api', __name__)
@@ -134,6 +134,64 @@ def delete_athlete(athlete_id):
     if athlete.role != 'athlete':
         return jsonify({'error': 'Utilisateur non modifiable'}), 400
     db.session.delete(athlete)
+    db.session.commit()
+    return jsonify({'ok': True})
+
+
+# ------------------------------------------------------------------ USERS ---
+
+@api_bp.get('/coach/users')
+@coach_required
+def list_users():
+    users = User.query.order_by(User.role.desc(), User.username).all()
+    return jsonify([u.to_dict() for u in users])
+
+
+@api_bp.post('/coach/users')
+@coach_required
+def create_user():
+    data = request.get_json(silent=True) or {}
+    username = (data.get('username') or '').strip()
+    password = data.get('password') or ''
+    role = data.get('role') or 'athlete'
+    display_name = (data.get('display_name') or '').strip() or username
+
+    if not username or not password:
+        return jsonify({'error': 'username et password requis'}), 400
+    if role not in ('athlete', 'coach'):
+        return jsonify({'error': 'role invalide'}), 400
+    if User.query.filter_by(username=username).first():
+        return jsonify({'error': 'Ce nom d\u2019utilisateur existe déjà'}), 409
+
+    user = User(username=username, role=role, display_name=display_name)
+    user.set_password(password)
+    db.session.add(user)
+    db.session.commit()
+    return jsonify(user.to_dict()), 201
+
+
+@api_bp.delete('/coach/users/<int:user_id>')
+@coach_required
+def delete_user(user_id):
+    user = User.query.get_or_404(user_id)
+    if user.id == request.current_user.id:
+        return jsonify({'error': 'Impossible de te supprimer toi-même'}), 400
+
+    # Purge manuelle des données liées (l'athlète comme le coach peuvent
+    # être référencés par des programmes/plans qu'ils ont créés).
+    plan_ids = [p.id for p in MealPlan.query.filter_by(athlete_id=user_id).all()]
+    if plan_ids:
+        MealEntry.query.filter(MealEntry.meal_plan_id.in_(plan_ids)).delete(synchronize_session=False)
+    MealPlan.query.filter_by(athlete_id=user_id).delete(synchronize_session=False)
+    MealPlan.query.filter_by(coach_id=user_id).update({'coach_id': None}, synchronize_session=False)
+    WeeklyBilanMarking.query.filter_by(athlete_id=user_id).delete(synchronize_session=False)
+    Program.query.filter_by(athlete_id=user_id).delete(synchronize_session=False)
+    Program.query.filter_by(coach_id=user_id).update({'coach_id': None}, synchronize_session=False)
+    JournalEntry.query.filter_by(athlete_id=user_id).delete(synchronize_session=False)
+    PerformanceEntry.query.filter_by(athlete_id=user_id).delete(synchronize_session=False)
+    Objective.query.filter_by(athlete_id=user_id).delete(synchronize_session=False)
+
+    db.session.delete(user)
     db.session.commit()
     return jsonify({'ok': True})
 
@@ -269,6 +327,49 @@ def delete_program(program_id):
     return jsonify({'ok': True})
 
 
+@api_bp.put('/programs/<int:program_id>')
+@coach_required
+def rename_program(program_id):
+    program = Program.query.get_or_404(program_id)
+    data = request.get_json(silent=True) or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'name requis'}), 400
+    program.name = name
+    db.session.commit()
+    return jsonify(program.to_dict())
+
+
+@api_bp.post('/programs/<int:program_id>/duplicate')
+@coach_required
+def duplicate_program(program_id):
+    source = Program.query.get_or_404(program_id)
+    data = request.get_json(silent=True) or {}
+    name = (data.get('name') or f'{source.name} (copie)').strip()
+    athlete_id = data.get('athlete_id') or source.athlete_id
+
+    new_program = Program(name=name, athlete_id=athlete_id, coach_id=request.current_user.id)
+    db.session.add(new_program)
+    db.session.flush()
+
+    for sess in source.sessions:
+        new_session = ProgramSession(
+            program_id=new_program.id, day_of_week=sess.day_of_week, session_name=sess.session_name,
+        )
+        db.session.add(new_session)
+        db.session.flush()
+        for ex in sess.exercises:
+            db.session.add(ExerciseEntry(
+                session_id=new_session.id, position=ex.position, name=ex.name, sets=ex.sets,
+                reps=ex.reps, rest=ex.rest, rir=ex.rir, intensification=ex.intensification,
+                muscle=ex.muscle, remark=ex.remark, series_description=ex.series_description,
+                main_series=ex.main_series,
+            ))
+
+    db.session.commit()
+    return jsonify(new_program.to_dict(with_sessions=True)), 201
+
+
 @api_bp.post('/programs/<int:program_id>/sessions')
 @coach_required
 def create_session(program_id):
@@ -298,6 +399,19 @@ def delete_session(session_id):
     db.session.delete(session_obj)
     db.session.commit()
     return jsonify({'ok': True})
+
+
+@api_bp.put('/sessions/<int:session_id>')
+@coach_required
+def rename_session(session_id):
+    session_obj = ProgramSession.query.get_or_404(session_id)
+    data = request.get_json(silent=True) or {}
+    if 'session_name' in data:
+        session_obj.session_name = data['session_name']
+    if 'day_of_week' in data:
+        session_obj.day_of_week = data['day_of_week']
+    db.session.commit()
+    return jsonify(session_obj.to_dict())
 
 
 @api_bp.post('/sessions/<int:session_id>/exercises')
@@ -718,6 +832,46 @@ def delete_meal_plan(plan_id):
     return jsonify({'ok': True})
 
 
+@api_bp.put('/meal-plans/<int:plan_id>')
+@coach_required
+def rename_meal_plan(plan_id):
+    plan = MealPlan.query.get_or_404(plan_id)
+    data = request.get_json(silent=True) or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'name requis'}), 400
+    plan.name = name
+    db.session.commit()
+    return jsonify(plan.to_dict())
+
+
+@api_bp.post('/meal-plans/<int:plan_id>/duplicate')
+@coach_required
+def duplicate_meal_plan(plan_id):
+    source = MealPlan.query.get_or_404(plan_id)
+    data = request.get_json(silent=True) or {}
+    name = (data.get('name') or f'{source.name} (copie)').strip()
+    athlete_id = data.get('athlete_id') or source.athlete_id
+
+    new_plan = MealPlan(
+        name=name, athlete_id=athlete_id, coach_id=request.current_user.id,
+        meal_count=source.meal_count,
+        **{f'meal_time_{i}': getattr(source, f'meal_time_{i}') for i in range(1, 7)},
+        **{f'meal_label_{i}': getattr(source, f'meal_label_{i}') for i in range(1, 7)},
+    )
+    db.session.add(new_plan)
+    db.session.flush()
+
+    for meal in source.meals:
+        db.session.add(MealEntry(
+            meal_plan_id=new_plan.id, food_id=meal.food_id, meal_number=meal.meal_number,
+            quantity=meal.quantity, position=meal.position,
+        ))
+
+    db.session.commit()
+    return jsonify(new_plan.to_dict()), 201
+
+
 @api_bp.post('/meal-plans/<int:plan_id>/meals')
 @coach_required
 def add_meal_entry(plan_id):
@@ -771,3 +925,127 @@ def set_meal_time(plan_id):
     setattr(plan, f'meal_label_{meal_number}', data.get('label'))
     db.session.commit()
     return jsonify(plan.to_dict())
+
+
+# ------------------------------------------------------------- BILAN HEBDO -
+
+def _week_start(d):
+    return d - timedelta(days=d.weekday())
+
+
+def _avg(values):
+    values = [v for v in values if v is not None]
+    return round(sum(values) / len(values), 1) if values else None
+
+
+def _weekly_metrics(athlete_id, week_start):
+    week_end = week_start + timedelta(days=6)
+
+    journal = (JournalEntry.query
+               .filter(JournalEntry.athlete_id == athlete_id,
+                       JournalEntry.entry_date >= week_start, JournalEntry.entry_date <= week_end)
+               .all())
+    perf = (PerformanceEntry.query
+            .filter(PerformanceEntry.athlete_id == athlete_id,
+                    PerformanceEntry.entry_date >= week_start, PerformanceEntry.entry_date <= week_end)
+            .all())
+
+    tonnage = sum((e.reps or 0) * (e.load or 0) for e in perf)
+    sessions = len({e.entry_date for e in perf})
+
+    return {
+        'weight': _avg([j.weight for j in journal]),
+        'kcals': _avg([j.kcals for j in journal]),
+        'sleep_hours': _avg([j.sleep_hours for j in journal]),
+        'energy': _avg([j.energy for j in journal]),
+        'stress': _avg([j.stress for j in journal]),
+        'tonnage': round(tonnage, 1),
+        'sessions': sessions,
+        'entries_logged': len(journal),
+    }
+
+
+METRIC_LABELS = [
+    ('weight', 'Poids (kg)'),
+    ('kcals', 'Calories (kcal)'),
+    ('sleep_hours', 'Sommeil (h)'),
+    ('energy', 'Énergie (/10)'),
+    ('stress', 'Stress (/10)'),
+    ('tonnage', 'Tonnage (kg)'),
+    ('sessions', 'Séances loggées'),
+    ('entries_logged', 'Jours de journal'),
+]
+
+
+@api_bp.get('/coach/bilan-hebdo')
+@coach_required
+def weekly_bilan():
+    today = date.today()
+    current_start = _week_start(today)
+    previous_start = current_start - timedelta(days=7)
+
+    athletes = User.query.filter_by(role='athlete').order_by(User.username).all()
+    result = []
+    for a in athletes:
+        current = _weekly_metrics(a.id, current_start)
+        previous = _weekly_metrics(a.id, previous_start)
+        metrics = []
+        for key, label in METRIC_LABELS:
+            cur_v, prev_v = current[key], previous[key]
+            diff = round(cur_v - prev_v, 1) if cur_v is not None and prev_v is not None else None
+            metrics.append({'key': key, 'label': label, 'current': cur_v, 'previous': prev_v, 'diff': diff})
+
+        marking = WeeklyBilanMarking.query.filter_by(athlete_id=a.id, week_start=current_start).first()
+        objectives = Objective.query.filter_by(athlete_id=a.id).order_by(Objective.created_at.desc()).limit(5).all()
+
+        result.append({
+            'athlete': a.to_dict(),
+            'week_start': current_start.isoformat(),
+            'done': bool(marking and marking.done),
+            'metrics': metrics,
+            'objectives': [o.to_dict() for o in objectives],
+        })
+
+    return jsonify(result)
+
+
+@api_bp.post('/coach/bilan-hebdo/mark')
+@coach_required
+def mark_weekly_bilan():
+    data = request.get_json(silent=True) or {}
+    athlete_id = data.get('athlete_id')
+    week_start = _parse_date(data.get('week_start'), _week_start(date.today()))
+    if not athlete_id:
+        return jsonify({'error': 'athlete_id requis'}), 400
+
+    marking = WeeklyBilanMarking.query.filter_by(athlete_id=athlete_id, week_start=week_start).first()
+    if marking:
+        marking.done = True
+    else:
+        marking = WeeklyBilanMarking(athlete_id=athlete_id, week_start=week_start, done=True)
+        db.session.add(marking)
+    db.session.commit()
+    return jsonify(marking.to_dict())
+
+
+@api_bp.post('/coach/bilan-hebdo/unmark')
+@coach_required
+def unmark_weekly_bilan():
+    data = request.get_json(silent=True) or {}
+    athlete_id = data.get('athlete_id')
+    week_start = _parse_date(data.get('week_start'), _week_start(date.today()))
+    marking = WeeklyBilanMarking.query.filter_by(athlete_id=athlete_id, week_start=week_start).first()
+    if marking:
+        marking.done = False
+        db.session.commit()
+        return jsonify(marking.to_dict())
+    return jsonify({'athlete_id': athlete_id, 'week_start': week_start.isoformat(), 'done': False})
+
+
+@api_bp.get('/coach/bilan-hebdo/unchecked-count')
+@coach_required
+def bilan_unchecked_count():
+    current_start = _week_start(date.today())
+    total_athletes = User.query.filter_by(role='athlete').count()
+    marked = WeeklyBilanMarking.query.filter_by(week_start=current_start, done=True).count()
+    return jsonify({'unchecked_count': max(total_athletes - marked, 0)})

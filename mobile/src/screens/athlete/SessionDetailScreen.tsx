@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../context/AuthContext';
 import {
   addExerciseEntry, createPerformance, deleteExerciseEntry, getProgram,
-  lastPerformanceForExercise, listExerciseBank, listPerformance, listPrograms,
+  lastPerformanceForExercise, listExerciseBank, listPerformance, listPrograms, updateExerciseEntry,
 } from '../../api/resources';
 import { apiErrorMessage } from '../../api/client';
 import { ExerciseEntryDTO, PerformanceEntryDTO, ProgramSessionDTO } from '../../api/types';
@@ -165,6 +165,59 @@ function AddExerciseForm({ sessionId, onAdded }: { sessionId: number; onAdded: (
   );
 }
 
+function EditExerciseForm({
+  exercise, onCancel, onSaved,
+}: { exercise: ExerciseEntryDTO; onCancel: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(exercise.name);
+  const [sets, setSets] = useState(exercise.sets ? String(exercise.sets) : '');
+  const [reps, setReps] = useState(exercise.reps ?? '');
+  const [rest, setRest] = useState(exercise.rest ?? '');
+  const [rir, setRir] = useState(exercise.rir ?? '');
+  const [muscle, setMuscle] = useState(exercise.muscle ?? '');
+  const [remark, setRemark] = useState(exercise.remark ?? '');
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await updateExerciseEntry(exercise.id, {
+        name: name.trim() || exercise.name,
+        sets: sets ? parseInt(sets, 10) : null,
+        reps: reps || null,
+        rest: rest || null,
+        rir: rir || null,
+        muscle: muscle || null,
+        remark: remark || null,
+      });
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <View style={{ marginTop: spacing.sm }}>
+      <Input placeholder="Nom de l'exercice" value={name} onChangeText={setName} />
+      <View style={styles.formRow}>
+        <Input style={styles.formInput} placeholder="Séries" keyboardType="numeric" value={sets} onChangeText={setSets} />
+        <Input style={styles.formInput} placeholder="Reps (ex: 8-12)" value={reps} onChangeText={setReps} />
+      </View>
+      <View style={styles.formRow}>
+        <Input style={styles.formInput} placeholder="Repos (ex: 90s)" value={rest} onChangeText={setRest} />
+        <Input style={styles.formInput} placeholder="RIR" value={rir} onChangeText={setRir} />
+      </View>
+      <View style={styles.formRow}>
+        <Input style={styles.formInput} placeholder="Muscle" value={muscle} onChangeText={setMuscle} />
+      </View>
+      <Input placeholder="Remarque (optionnel)" value={remark} onChangeText={setRemark} style={{ marginTop: spacing.sm }} />
+      <View style={[styles.formRow, { marginTop: spacing.md }]}>
+        <Button title="Annuler" variant="ghost" onPress={onCancel} style={{ flex: 1 }} />
+        <Button title="Enregistrer" onPress={handleSave} loading={saving} style={{ flex: 1 }} />
+      </View>
+    </View>
+  );
+}
+
 function ExerciseCard({
   exercise, index, athleteId, sessionId, readOnly, isCoach, todayEntries, onLogged, onDeleted,
 }: {
@@ -175,6 +228,7 @@ function ExerciseCard({
   const [values, setValues] = useState<Record<number, { reps: string; load: string }>>({});
   const [savingSeries, setSavingSeries] = useState<number | null>(null);
   const [justPR, setJustPR] = useState<number | null>(null);
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     lastPerformanceForExercise(athleteId, exercise.name).then(setLastEntries).catch(() => setLastEntries([]));
@@ -231,19 +285,32 @@ function ExerciseCard({
           </View>
         </View>
         {isCoach && (
-          <Button
-            title="✕"
-            variant="ghost"
-            onPress={async () => { await deleteExerciseEntry(exercise.id); onDeleted(); }}
-            style={styles.deleteExerciseBtn}
-          />
+          <View style={{ flexDirection: 'row' }}>
+            <Button title="✎" variant="ghost" onPress={() => setEditing((e) => !e)} style={styles.deleteExerciseBtn} />
+            <Button
+              title="✕"
+              variant="ghost"
+              onPress={async () => { await deleteExerciseEntry(exercise.id); onDeleted(); }}
+              style={styles.deleteExerciseBtn}
+            />
+          </View>
         )}
       </View>
-      <Text style={styles.exerciseMeta}>
-        {exercise.sets ?? seriesList.length} séries · {exercise.reps ?? '-'} reps · repos {exercise.rest ?? '-'}
-        {exercise.rir ? ` · RIR ${exercise.rir}` : ''}
-      </Text>
-      {exercise.remark ? <Text style={styles.remark}>💬 {exercise.remark}</Text> : null}
+      {editing ? (
+        <EditExerciseForm
+          exercise={exercise}
+          onCancel={() => setEditing(false)}
+          onSaved={() => { setEditing(false); onDeleted(); }}
+        />
+      ) : (
+        <>
+          <Text style={styles.exerciseMeta}>
+            {exercise.sets ?? seriesList.length} séries · {exercise.reps ?? '-'} reps · repos {exercise.rest ?? '-'}
+            {exercise.rir ? ` · RIR ${exercise.rir}` : ''}
+          </Text>
+          {exercise.remark ? <Text style={styles.remark}>💬 {exercise.remark}</Text> : null}
+        </>
+      )}
 
       <View style={{ marginTop: spacing.md }}>
         {seriesList.map((s) => {

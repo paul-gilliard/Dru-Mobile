@@ -4,7 +4,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
 import { useAthleteScope } from '../../context/AthleteScopeContext';
 import {
-  addMealEntry, createMealPlan, deleteMealEntry, deleteMealPlan, getMealPlan, listFoods, listMealPlans,
+  addMealEntry, createMealPlan, deleteMealEntry, deleteMealPlan, duplicateMealPlan, getMealPlan,
+  listFoods, listMealPlans, renameMealPlan, setMealTime,
 } from '../../api/resources';
 import { apiErrorMessage } from '../../api/client';
 import { FoodDTO, MealPlanDTO } from '../../api/types';
@@ -97,12 +98,50 @@ function MealPlanCard({
 }: { plan: MealPlanDTO; isCoach: boolean; onChanged: () => void; onDeletePlan: () => void }) {
   const totals = plan.totals;
   const [addingToMeal, setAddingToMeal] = useState<number | null>(null);
+  const [editingMealTime, setEditingMealTime] = useState<number | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState(plan.name);
+  const [busy, setBusy] = useState(false);
+
+  const handleRename = async () => {
+    if (!nameDraft.trim() || nameDraft.trim() === plan.name) { setRenaming(false); return; }
+    setBusy(true);
+    try {
+      await renameMealPlan(plan.id, nameDraft.trim());
+      onChanged();
+    } finally {
+      setBusy(false);
+      setRenaming(false);
+    }
+  };
+
+  const handleDuplicate = async () => {
+    setBusy(true);
+    try {
+      await duplicateMealPlan(plan.id, { name: `${plan.name} (copie)` });
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <Card style={{ marginBottom: spacing.lg }}>
       <View style={styles.cardHeader}>
-        <SectionTitle style={{ marginBottom: 0, flex: 1 }} icon="🍽️">{plan.name}</SectionTitle>
-        {isCoach && <Button title="Suppr." variant="danger" onPress={onDeletePlan} style={styles.smallBtn} />}
+        {renaming ? (
+          <Input style={{ flex: 1 }} value={nameDraft} onChangeText={setNameDraft} autoFocus onSubmitEditing={handleRename} />
+        ) : (
+          <Pressable style={{ flex: 1 }} onPress={() => isCoach && setRenaming(true)} disabled={!isCoach}>
+            <SectionTitle style={{ marginBottom: 0 }} icon="🍽️">{plan.name}{isCoach ? ' ✎' : ''}</SectionTitle>
+          </Pressable>
+        )}
+        {isCoach && !renaming && (
+          <View style={styles.headerActions}>
+            <Button title="Dupl." variant="secondary" onPress={handleDuplicate} loading={busy} style={styles.smallBtn} />
+            <Button title="Suppr." variant="danger" onPress={onDeletePlan} style={styles.smallBtn} />
+          </View>
+        )}
+        {renaming && <Button title="OK" onPress={handleRename} loading={busy} style={styles.smallBtn} />}
       </View>
       <View style={styles.kcalHero}>
         <Text style={styles.kcalValue}>{Math.round(totals.kcals)}</Text>
@@ -120,7 +159,23 @@ function MealPlanCard({
         const time = plan.meal_times[mealNumber - 1];
         return (
           <View key={mealNumber} style={styles.mealBlock}>
-            <Text style={styles.mealTitle}>{label}{time ? ` · ${time}` : ''}</Text>
+            <View style={styles.mealTitleRow}>
+              <Text style={styles.mealTitle}>{label}{time ? ` · ${time}` : ''}</Text>
+              {isCoach && (
+                <Pressable onPress={() => setEditingMealTime(editingMealTime === mealNumber ? null : mealNumber)}>
+                  <Text style={styles.editMealLink}>🕐 Modifier</Text>
+                </Pressable>
+              )}
+            </View>
+            {isCoach && editingMealTime === mealNumber && (
+              <MealTimeEditor
+                planId={plan.id}
+                mealNumber={mealNumber}
+                initialLabel={plan.meal_labels[mealNumber - 1] ?? ''}
+                initialTime={plan.meal_times[mealNumber - 1] ?? ''}
+                onDone={() => { setEditingMealTime(null); onChanged(); }}
+              />
+            )}
             {meals.map((m) => (
               <View key={m.id} style={styles.foodRow}>
                 <Text style={styles.foodName}>{m.food_name}</Text>
@@ -149,6 +204,32 @@ function MealPlanCard({
         );
       })}
     </Card>
+  );
+}
+
+function MealTimeEditor({
+  planId, mealNumber, initialLabel, initialTime, onDone,
+}: { planId: number; mealNumber: number; initialLabel: string; initialTime: string; onDone: () => void }) {
+  const [label, setLabel] = useState(initialLabel);
+  const [time, setTime] = useState(initialTime);
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await setMealTime(planId, mealNumber, time.trim(), label.trim());
+      onDone();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <View style={styles.timeEditor}>
+      <Input style={{ flex: 1 }} placeholder="Nom (ex: Intra workout)" value={label} onChangeText={setLabel} />
+      <Input style={styles.timeInput} placeholder="08h30" value={time} onChangeText={setTime} />
+      <Button title="OK" onPress={handleSave} loading={saving} style={styles.smallBtn} />
+    </View>
   );
 }
 
@@ -212,8 +293,13 @@ const styles = StyleSheet.create({
   content: { padding: spacing.lg, paddingBottom: spacing.xxl },
   row: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center' },
   createBtn: { paddingHorizontal: spacing.lg },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.xs },
+  cardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.xs, gap: spacing.xs },
+  headerActions: { flexDirection: 'row', gap: spacing.xs },
   smallBtn: { paddingVertical: spacing.xs, paddingHorizontal: spacing.sm },
+  mealTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  editMealLink: { color: colors.primary, fontSize: fontSize.xs, fontWeight: '700' },
+  timeEditor: { flexDirection: 'row', gap: spacing.xs, alignItems: 'center', marginBottom: spacing.sm },
+  timeInput: { width: 80, paddingVertical: spacing.xs, textAlign: 'center' },
   kcalHero: { alignItems: 'center', marginBottom: spacing.md },
   kcalValue: { color: colors.text, fontSize: 40, fontWeight: '900' },
   kcalUnit: { color: colors.textMuted, fontSize: fontSize.xs, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },

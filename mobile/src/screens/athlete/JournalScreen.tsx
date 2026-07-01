@@ -1,11 +1,11 @@
 import React, { useCallback, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAthleteScope } from '../../context/AthleteScopeContext';
 import { listJournal, upsertJournal } from '../../api/resources';
 import { apiErrorMessage } from '../../api/client';
 import { JournalEntryDTO } from '../../api/types';
-import { Button, Card, EmptyState, ErrorView, Input, LoadingView, SectionTitle } from '../../components/ui';
+import { Badge, Button, Card, EmptyState, ErrorView, Input, LoadingView, SectionTitle } from '../../components/ui';
 import { colors, fontSize, spacing } from '../../theme';
 import { formatDateFR, isoDaysAgo, todayISO } from '../../utils/format';
 
@@ -23,6 +23,13 @@ const FIELD_DEFS: { key: keyof JournalEntryDTO; label: string; unit?: string; ic
   { key: 'hunger', label: 'Faim', unit: '/10', icon: '🍽️' },
 ];
 
+const TEXT_FIELD_DEFS: { key: keyof JournalEntryDTO; label: string; icon: string; placeholder: string }[] = [
+  { key: 'food_quality', label: 'Qualité aliments', icon: '⭐', placeholder: 'ex: Très bonne' },
+  { key: 'digestion', label: 'Digestion', icon: '🌿', placeholder: 'ex: Facile' },
+];
+
+const CYCLE_PHASES = ['SPM', 'phase menstruelle', 'en paix'];
+
 export default function JournalScreen() {
   const { athleteId, readOnly } = useAthleteScope();
 
@@ -31,6 +38,7 @@ export default function JournalScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
+  const [cyclePhase, setCyclePhase] = useState('');
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -41,11 +49,12 @@ export default function JournalScreen() {
       const today = data.find((e) => e.entry_date === todayISO());
       if (today) {
         const initial: Record<string, string> = {};
-        FIELD_DEFS.forEach(({ key }) => {
+        [...FIELD_DEFS, ...TEXT_FIELD_DEFS].forEach(({ key }) => {
           const val = today[key];
           if (val !== null && val !== undefined) initial[key as string] = String(val);
         });
         setForm(initial);
+        setCyclePhase(today.menstrual_cycle ?? '');
       }
     } catch (err) {
       setError(apiErrorMessage(err));
@@ -67,6 +76,11 @@ export default function JournalScreen() {
           payload[key as string] = Number(raw.replace(',', '.'));
         }
       });
+      TEXT_FIELD_DEFS.forEach(({ key }) => {
+        const raw = form[key as string];
+        if (raw) payload[key as string] = raw;
+      });
+      if (cyclePhase) payload.menstrual_cycle = cyclePhase;
       await upsertJournal(payload);
       await load();
     } catch (err) {
@@ -109,6 +123,26 @@ export default function JournalScreen() {
                   placeholder="-"
                 />
               </View>
+            ))}
+          </View>
+          <View style={styles.textGrid}>
+            {TEXT_FIELD_DEFS.map(({ key, label, icon, placeholder }) => (
+              <View key={key as string} style={styles.textGridItem}>
+                <Text style={styles.fieldLabel}>{icon} {label}</Text>
+                <Input
+                  value={form[key as string] ?? ''}
+                  onChangeText={(t) => setForm((f) => ({ ...f, [key as string]: t }))}
+                  placeholder={placeholder}
+                />
+              </View>
+            ))}
+          </View>
+          <Text style={[styles.fieldLabel, { marginTop: spacing.sm }]}>🔄 Cycle menstruel</Text>
+          <View style={styles.phaseRow}>
+            {CYCLE_PHASES.map((phase) => (
+              <Pressable key={phase} onPress={() => setCyclePhase(cyclePhase === phase ? '' : phase)}>
+                <Badge label={phase} color={cyclePhase === phase ? colors.secondary : colors.textFaint} />
+              </Pressable>
             ))}
           </View>
           <Button title="Enregistrer" onPress={handleSave} loading={saving} style={{ marginTop: spacing.lg }} />
@@ -159,6 +193,9 @@ const styles = StyleSheet.create({
   streakText: { color: colors.gold, fontWeight: '800', flex: 1, fontSize: fontSize.sm },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm },
   gridItem: { width: '31%' },
+  textGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md },
+  textGridItem: { width: '47%' },
+  phaseRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.xs },
   fieldLabel: { color: colors.textMuted, fontSize: fontSize.xs, marginBottom: spacing.xs, fontWeight: '600' },
   historyDate: { color: colors.text, fontWeight: '800', marginBottom: spacing.xs, textTransform: 'capitalize' },
   historyRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },

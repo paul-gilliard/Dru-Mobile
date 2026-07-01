@@ -43,10 +43,15 @@
   Objectifs, menu "Plus".
 - Écrans coach : Dashboard (liste athlètes + création), Détail athlète
   (mêmes écrans que l'athlète, réutilisés via `AthleteScopeContext`, avec
-  gestion : créer un programme/séance/exercice, créer un plan
-  alimentaire/ajouter des aliments, créer/supprimer des objectifs),
-  Banque d'exercices (CRUD), Banque d'aliments (CRUD), gestion des
-  disponibilités, menu "Plus".
+  gestion complète : créer/renommer/dupliquer un programme, créer/renommer/
+  supprimer une séance, ajouter/éditer/supprimer un exercice, créer/renommer/
+  dupliquer un plan alimentaire, éditer l'heure/le libellé de chaque repas,
+  ajouter/retirer des aliments, créer/supprimer des objectifs), Banque
+  d'exercices (CRUD + édition), Banque d'aliments (CRUD + édition, marque et
+  macros avancées), gestion des disponibilités, écran Utilisateurs (lister
+  tous les rôles, créer coach/athlète, supprimer), écran Easy Bilan Hebdo
+  (comparaison semaine actuelle/précédente par athlète + coche "bilan fait"),
+  menu "Plus".
 - Réutilisation forte de la logique métier : les écrans Programme / Journal /
   Performance / Nutrition / Objectifs / Statistiques sont **partagés** entre
   l'espace athlète et l'espace coach (vue d'un athlète), via
@@ -115,6 +120,58 @@
     serrés, feedback de pression sur les créneaux de disponibilité, champ
     description d'objectif non tronqué).
 
+### Audit de parité avec l'app web en production + comblement des écarts
+
+Session de comparaison directe avec `https://web-production-9fd5b.up.railway.app/`
+(monkey test coach `admin`/`azerty` et athlète `paul`/`PGMisme02430`), page par
+page, pour vérifier que tous les menus et fonctionnalités de l'app web existent
+côté mobile.
+
+**Constat général** : la structure de menus mobile (coach : Athlètes /
+Exercices / Aliments / Dispo / Plus ; athlète : Accueil / Programme / Journal /
+Nutrition / Plus) couvre déjà l'intégralité des sections web (Accueil,
+Programmes, Plans Alimentaires, Suivi, Easy Bilan Hebdo, Exercices, Aliments,
+Utilisateurs, Disponibilités). Le contenu de chaque section a été comparé
+champ par champ.
+
+**Écarts comblés dans cette session** :
+- Banque d'exercices : ajout de l'édition (renommer / changer le groupe
+  musculaire) — le backend exposait déjà `PUT /api/exercise-bank/<id>`, seule
+  l'UI manquait.
+- Banque d'aliments : ajout du champ **marque**, des macros avancées
+  (saturés, sucres, fibres, sel via un panneau "Plus de détails"), et de
+  l'édition d'un aliment existant (`PUT /api/foods/<id>`, déjà présent côté
+  backend).
+- Journal : ajout des champs **Qualité aliments**, **Digestion** (texte libre)
+  et **Cycle menstruel** (SPM / phase menstruelle / en paix) — présents dans
+  le modèle de données mais absents du formulaire mobile.
+- Programme : ajout d'un bandeau de statistiques (nb d'exercices, séries
+  totales, séances/semaine) et d'un bouton **Récap** ouvrant une modale de
+  récapitulatif du programme jour par jour (équivalent du bouton "Recap" de
+  l'éditeur de programme web).
+- (Session précédente) Gestion complète des utilisateurs, renommage/
+  duplication de programmes et plans alimentaires, renommage/suppression de
+  séances, édition d'exercice existant, Easy Bilan Hebdo (comparaison
+  semaine/semaine + coche "bilan fait").
+
+**Écarts identifiés mais volontairement non comblés (hors scope temps
+raisonnable)**, car ce sont des outils avancés / de niche plutôt que des
+fonctionnalités cœur :
+- Éditeur de séries au niveau **par série** (le web permet des reps/repos/RIR
+  différents pour chaque série d'un même exercice, avec réordonnancement par
+  glisser-déposer ; le mobile édite l'exercice dans son ensemble).
+- Page "Suivi" (`/coach/stats`) : tableau de bord analytique très riche
+  (comparaison hebdo détaillée par métrique, graphiques radar de tonnage,
+  générateur de métriques croisées "Analyse croisée"). Le mobile couvre une
+  version simplifiée (tonnage/muscle + tendance poids dans "Statistiques", et
+  la comparaison hebdo via "Easy Bilan Hebdo").
+- Duplication d'un repas vers un autre au sein d'un même plan alimentaire
+  (le mobile permet de dupliquer un plan entier, pas un repas isolé).
+- Page "DB" (`/coach/db-view`) : outil de debug interne pour le développeur,
+  sans valeur pour un utilisateur final — non repris côté mobile.
+- Sélecteur de lieu pour les disponibilités (un seul lieu existe dans les
+  deux jeux de données actuels donc non bloquant).
+
 ## Comment lancer le projet
 
 Voir `README.md`. En résumé :
@@ -129,22 +186,22 @@ LAN de la machine qui fait tourner le backend (visible dans la sortie de
 `python run.py`, ex: `192.168.1.19`). Déjà pré-rempli avec l'IP détectée sur
 cette machine au moment du développement — à re-vérifier si elle change.
 
-## Ce qui n'a PAS été migré (hors scope de cette session)
+## Ce qui n'a PAS été migré (hors scope, voir audit de parité ci-dessus)
 
-Ces écrans web sont avancés/analytiques et n'ont pas d'équivalent mobile pour
-l'instant (l'API mobile ne les expose pas non plus) :
-- Stats coach avancées complètes (résumés 7/14/28 jours détaillés, détail
-  par exercice avec séries principales/secondaires) — une version simplifiée
-  (tonnage/muscle + tendance poids) est disponible dans l'onglet
-  "Statistiques", mais pas tout le détail de `coach_stats.js`.
-- Bilan hebdomadaire coach (`coach_weekly_summary`, panneau d'attention,
-  marquage hebdo).
-- Analyse croisée (`cross_analysis.js`, `weekly_compare.js`).
-- Vue base de données brute (`coach_db_view`) — pas pertinente sur mobile.
-- Édition fine des séries d'un exercice (l'app web permet une description
-  libre multi-lignes par série ; le mobile permet d'ajouter un exercice mais
-  pas encore d'éditer le détail de chaque série individuellement après
-  création).
+Ces écrans web sont avancés/analytiques et n'ont pas d'équivalent mobile complet
+pour l'instant :
+- Page "Suivi" coach avancée : comparaison hebdo détaillée métrique par
+  métrique, graphiques radar de tonnage par groupe musculaire, "Analyse
+  croisée" (générateur de métriques custom). Une version simplifiée (tonnage/
+  muscle + tendance poids) existe dans l'onglet "Statistiques", et la
+  comparaison semaine/semaine par athlète existe via "Easy Bilan Hebdo".
+- Vue base de données brute (`/coach/db-view`) — outil de debug interne, pas
+  pertinent pour un utilisateur final sur mobile.
+- Édition fine des séries d'un exercice (l'app web permet des reps/repos/RIR
+  différents par série avec glisser-déposer pour réordonner ; le mobile édite
+  l'exercice dans son ensemble, pas série par série).
+- Duplication d'un repas isolé vers un autre au sein d'un même plan
+  alimentaire (seule la duplication d'un plan entier est possible).
 
 ## Prochaines étapes suggérées
 

@@ -2,7 +2,7 @@ import { apiClient } from './client';
 import {
   AthleteDashboardDTO, AvailabilityDTO, CoachDashboardDTO, DashboardDTO, ExerciseBankDTO,
   FoodDTO, JournalEntryDTO, JournalTrendDTO, MealPlanDTO, ObjectiveDTO, PerformanceEntryDTO,
-  ProgramDTO, TonnageByMuscleDTO, UserDTO,
+  ProgramDTO, ProgramSessionDTO, TonnageByMuscleDTO, UserDTO, WeeklyBilanEntryDTO,
 } from './types';
 
 export async function getDashboard() {
@@ -32,6 +32,20 @@ export async function createAthlete(payload: { username: string; password: strin
 
 export async function deleteAthlete(athleteId: number) {
   await apiClient.delete(`/coach/athletes/${athleteId}`);
+}
+
+export async function listUsers() {
+  const { data } = await apiClient.get<UserDTO[]>('/coach/users');
+  return data;
+}
+
+export async function createUser(payload: { username: string; password: string; role: 'coach' | 'athlete'; display_name?: string }) {
+  const { data } = await apiClient.post<UserDTO>('/coach/users', payload);
+  return data;
+}
+
+export async function deleteUser(userId: number) {
+  await apiClient.delete(`/coach/users/${userId}`);
 }
 
 export async function listObjectives(athleteId: number) {
@@ -84,6 +98,16 @@ export async function deleteProgram(programId: number) {
   await apiClient.delete(`/programs/${programId}`);
 }
 
+export async function renameProgram(programId: number, name: string) {
+  const { data } = await apiClient.put<ProgramDTO>(`/programs/${programId}`, { name });
+  return data;
+}
+
+export async function duplicateProgram(programId: number, payload: { name?: string; athlete_id?: number } = {}) {
+  const { data } = await apiClient.post<ProgramDTO>(`/programs/${programId}/duplicate`, payload);
+  return data;
+}
+
 export async function createSession(programId: number, payload: { day_of_week: number; session_name?: string }) {
   const { data } = await apiClient.post(`/programs/${programId}/sessions`, payload);
   return data;
@@ -91,6 +115,11 @@ export async function createSession(programId: number, payload: { day_of_week: n
 
 export async function deleteSession(sessionId: number) {
   await apiClient.delete(`/sessions/${sessionId}`);
+}
+
+export async function renameSession(sessionId: number, sessionName: string) {
+  const { data } = await apiClient.put<ProgramSessionDTO>(`/sessions/${sessionId}`, { session_name: sessionName });
+  return data;
 }
 
 export async function addExerciseEntry(sessionId: number, payload: Record<string, unknown>) {
@@ -114,6 +143,11 @@ export async function listExerciseBank() {
 
 export async function createExerciseBank(payload: { name: string; muscle_group: string }) {
   const { data } = await apiClient.post<ExerciseBankDTO>('/exercise-bank', payload);
+  return data;
+}
+
+export async function updateExerciseBank(id: number, payload: { name?: string; muscle_group?: string }) {
+  const { data } = await apiClient.put<ExerciseBankDTO>(`/exercise-bank/${id}`, payload);
   return data;
 }
 
@@ -170,6 +204,11 @@ export async function createFood(payload: Partial<FoodDTO>) {
   return data;
 }
 
+export async function updateFood(id: number, payload: Partial<FoodDTO>) {
+  const { data } = await apiClient.put<FoodDTO>(`/foods/${id}`, payload);
+  return data;
+}
+
 export async function deleteFood(id: number) {
   await apiClient.delete(`/foods/${id}`);
 }
@@ -191,6 +230,16 @@ export async function createMealPlan(payload: { name: string; athlete_id: number
 
 export async function deleteMealPlan(id: number) {
   await apiClient.delete(`/meal-plans/${id}`);
+}
+
+export async function renameMealPlan(id: number, name: string) {
+  const { data } = await apiClient.put<MealPlanDTO>(`/meal-plans/${id}`, { name });
+  return data;
+}
+
+export async function duplicateMealPlan(id: number, payload: { name?: string; athlete_id?: number } = {}) {
+  const { data } = await apiClient.post<MealPlanDTO>(`/meal-plans/${id}/duplicate`, payload);
+  return data;
 }
 
 export async function addMealEntry(planId: number, payload: { meal_number: number; food_id: number; quantity?: number }) {
@@ -225,5 +274,20 @@ export async function getJournalTrend(athleteId: number, days = 30) {
   const { data } = await apiClient.get<JournalTrendDTO[]>('/stats/journal-trend', {
     params: { athlete_id: athleteId, days },
   });
+  return data;
+}
+
+export async function getWeeklyBilan() {
+  const { data } = await apiClient.get<WeeklyBilanEntryDTO[]>('/coach/bilan-hebdo');
+  return data;
+}
+
+export async function markWeeklyBilan(athleteId: number, weekStart?: string) {
+  const { data } = await apiClient.post('/coach/bilan-hebdo/mark', { athlete_id: athleteId, week_start: weekStart });
+  return data;
+}
+
+export async function unmarkWeeklyBilan(athleteId: number, weekStart?: string) {
+  const { data } = await apiClient.post('/coach/bilan-hebdo/unmark', { athlete_id: athleteId, week_start: weekStart });
   return data;
 }

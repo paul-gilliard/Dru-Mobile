@@ -10,6 +10,8 @@ import CreateAthleteScreen from '../screens/coach/CreateAthleteScreen';
 import ExerciseBankScreen from '../screens/coach/ExerciseBankScreen';
 import FoodBankScreen from '../screens/coach/FoodBankScreen';
 import CoachMoreScreen from '../screens/coach/CoachMoreScreen';
+import UsersScreen from '../screens/coach/UsersScreen';
+import WeeklyBilanScreen from '../screens/coach/WeeklyBilanScreen';
 import SessionDetailScreen from '../screens/athlete/SessionDetailScreen';
 import AvailabilityScreen from '../screens/athlete/AvailabilityScreen';
 
@@ -66,6 +68,8 @@ function MoreStack() {
   return (
     <Stack.Navigator screenOptions={stackScreenOptions}>
       <Stack.Screen name="Dashboard" component={CoachMoreScreen} options={{ title: 'Plus' }} />
+      <Stack.Screen name="Users" component={UsersScreen} options={{ title: 'Utilisateurs' }} />
+      <Stack.Screen name="WeeklyBilan" component={WeeklyBilanScreen} options={{ title: 'Bilan Hebdo' }} />
     </Stack.Navigator>
   );
 }

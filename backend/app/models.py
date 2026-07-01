@@ -356,6 +356,26 @@ class MealEntry(db.Model):
         }
 
 
+class WeeklyBilanMarking(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    athlete_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    week_start = db.Column(db.Date, nullable=False, index=True)  # lundi de la semaine concernée
+    done = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('athlete_id', 'week_start', name='uq_bilan_athlete_week'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'athlete_id': self.athlete_id,
+            'week_start': self.week_start.isoformat(),
+            'done': bool(self.done),
+        }
+
+
 class Objective(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     athlete_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False, index=True)
