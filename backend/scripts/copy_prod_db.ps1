@@ -51,12 +51,11 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $dumpFile = Join-Path $scriptDir "prod_copy_dump.sql"
 $compatFile = Join-Path $scriptDir "migrate_copy_compat.sql"
 
-Write-Host "==> 1/4 Dump de la base distante ($SourceDatabase@$SourceHost:$SourcePort)..." -ForegroundColor Cyan
+Write-Host "==> 1/4 Dump de la base distante (${SourceDatabase}@${SourceHost}:${SourcePort})..." -ForegroundColor Cyan
 & $mysqldump `
     --host=$SourceHost --port=$SourcePort `
     --user=$SourceUser --password=$SourcePassword `
     --no-tablespaces --single-transaction --routines --triggers `
-    --column-statistics=0 `
     $SourceDatabase | Out-File -FilePath $dumpFile -Encoding utf8
 
 if ($LASTEXITCODE -ne 0) { throw "Echec du mysqldump (code $LASTEXITCODE)." }
