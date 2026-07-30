@@ -1,0 +1,2 @@
+# Runtime for Railway / Render / similar PaaS
+python-3.11.9
