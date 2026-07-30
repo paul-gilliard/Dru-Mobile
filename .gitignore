@@ -1,4 +1,4 @@
-## Backend (Python)
+﻿## Backend (Python)
 backend/venv/
 backend/__pycache__/
 backend/**/__pycache__/
@@ -19,8 +19,10 @@ mobile/*.p12
 mobile/*.key
 mobile/*.mobileprovision
 mobile/.env
+mobile/.claude/
 
-## OS / editors
+## OS / editors / misc
 .DS_Store
 Thumbs.db
 *.log
+expo-qr.png
