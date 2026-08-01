@@ -33,6 +33,13 @@ def create_app():
                     db.session.execute(text("ALTER TABLE `user` ADD COLUMN display_name VARCHAR(128) NULL"))
                 db.session.execute(text("ALTER TABLE `user` MODIFY COLUMN password_hash VARCHAR(255) NOT NULL"))
                 db.session.commit()
+            if 'program' in insp.get_table_names():
+                pcols = {c['name'] for c in insp.get_columns('program')}
+                if 'is_active' not in pcols:
+                    db.session.execute(text(
+                        "ALTER TABLE program ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 0"
+                    ))
+                    db.session.commit()
         except Exception as e:
             db.session.rollback()
             print(f"compat alter skipped: {e}")

@@ -104,6 +104,11 @@ export async function renameProgram(programId: number, name: string) {
   return data;
 }
 
+export async function activateProgram(programId: number) {
+  const { data } = await apiClient.post<ProgramDTO>(`/programs/${programId}/activate`);
+  return data;
+}
+
 export async function duplicateProgram(programId: number, payload: { name?: string; athlete_id?: number } = {}) {
   const { data } = await apiClient.post<ProgramDTO>(`/programs/${programId}/duplicate`, payload);
   return data;
@@ -188,6 +193,11 @@ export async function lastPerformanceForExercise(athleteId: number, exercise: st
 
 export async function createPerformance(payload: Partial<PerformanceEntryDTO> & { athlete_id?: number }) {
   const { data } = await apiClient.post<PerformanceEntryDTO>('/performance', payload);
+  return data;
+}
+
+export async function updatePerformance(id: number, payload: Partial<PerformanceEntryDTO>) {
+  const { data } = await apiClient.put<PerformanceEntryDTO>(`/performance/${id}`, payload);
   return data;
 }
 

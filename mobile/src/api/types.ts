@@ -44,6 +44,7 @@ export interface ProgramDTO {
   name: string;
   athlete_id: number;
   coach_id: number | null;
+  is_active?: boolean;
   sessions?: ProgramSessionDTO[];
 }
 

@@ -1,7 +1,7 @@
 export type AthleteStackParamList = {
   Home: undefined;
   Program: undefined;
-  SessionDetail: { sessionId: number; athleteId?: number; readOnly?: boolean };
+  SessionDetail: { sessionId: number; athleteId?: number; readOnly?: boolean; logDate?: string };
   Journal: undefined;
   Nutrition: undefined;
   More: undefined;
@@ -14,7 +14,7 @@ export type AthleteStackParamList = {
 export type CoachStackParamList = {
   Dashboard: undefined;
   AthleteDetail: { athleteId: number; athleteName: string };
-  SessionDetail: { sessionId: number; athleteId?: number; readOnly?: boolean };
+  SessionDetail: { sessionId: number; athleteId?: number; readOnly?: boolean; logDate?: string };
   CreateAthlete: undefined;
   Users: undefined;
   MealPlans: undefined;

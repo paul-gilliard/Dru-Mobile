@@ -6,7 +6,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../context/AuthContext';
 import { useAthleteScope } from '../../context/AthleteScopeContext';
 import {
-  createProgram, createSession, deleteProgram, deleteSession, duplicateProgram, getProgram,
+  activateProgram, createProgram, createSession, deleteProgram, deleteSession, duplicateProgram, getProgram,
   listPrograms, renameProgram, renameSession,
 } from '../../api/resources';
 import { apiErrorMessage } from '../../api/client';
@@ -71,6 +71,15 @@ export default function ProgramScreen() {
     }
   };
 
+  const handleActivateProgram = async (programId: number) => {
+    try {
+      await activateProgram(programId);
+      await load();
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    }
+  };
+
   if (loading) return <LoadingView label="Chargement du programme..." />;
   if (error) return <ErrorView message={error} onRetry={load} />;
 
@@ -95,37 +104,69 @@ export default function ProgramScreen() {
         </Card>
       )}
 
+      {!isCoach && programs.length > 1 ? (
+        <Text style={styles.hintText}>
+          Plie / déplie tes programmes et choisis celui affiché sur l’accueil.
+        </Text>
+      ) : null}
+
       {programs.length === 0 ? (
         <EmptyState icon="🏋️" title="Aucun programme assigné" subtitle={isCoach ? 'Crée un programme ci-dessus.' : "Ton coach n'a pas encore créé de programme."} />
       ) : (
-        programs.map((program) => (
-          <ProgramCard
-            key={program.id}
-            program={program}
-            isCoach={isCoach}
-            onPressSession={(sessionId) => navigation.navigate('SessionDetail', { sessionId, athleteId, readOnly })}
-            onDeleteProgram={() => handleDeleteProgram(program.id)}
-          />
-        ))
+        programs.map((program, index) => {
+          const anyActive = programs.some((p) => p.is_active);
+          return (
+            <ProgramCard
+              key={program.id}
+              program={program}
+              isCoach={isCoach}
+              readOnly={readOnly}
+              defaultExpanded={!!program.is_active || programs.length === 1 || (!anyActive && index === 0)}
+              onPressSession={(sessionId) => navigation.navigate('SessionDetail', { sessionId, athleteId, readOnly })}
+              onDeleteProgram={() => handleDeleteProgram(program.id)}
+              onActivate={() => handleActivateProgram(program.id)}
+              onChanged={load}
+            />
+          );
+        })
       )}
     </ScrollView>
   );
 }
 
 function ProgramCard({
-  program, isCoach, onPressSession, onDeleteProgram,
+  program, isCoach, readOnly, defaultExpanded, onPressSession, onDeleteProgram, onActivate, onChanged,
 }: {
-  program: ProgramDTO; isCoach: boolean; onPressSession: (sessionId: number) => void; onDeleteProgram: () => void;
+  program: ProgramDTO;
+  isCoach: boolean;
+  readOnly: boolean;
+  defaultExpanded: boolean;
+  onPressSession: (sessionId: number) => void;
+  onDeleteProgram: () => void;
+  onActivate: () => void;
+  onChanged: () => void;
 }) {
   const [full, setFull] = useState<ProgramDTO>(program);
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const [addingSession, setAddingSession] = useState(false);
   const [savingDay, setSavingDay] = useState<number | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState(program.name);
   const [busy, setBusy] = useState(false);
+  const [activating, setActivating] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<number | null>(null);
   const [sessionNameDraft, setSessionNameDraft] = useState('');
   const [recapOpen, setRecapOpen] = useState(false);
+
+  const isActive = !!full.is_active;
+
+  React.useEffect(() => {
+    setFull(program);
+  }, [program]);
+
+  React.useEffect(() => {
+    setExpanded(defaultExpanded);
+  }, [defaultExpanded]);
 
   const refresh = useCallback(async () => {
     try {
@@ -174,8 +215,20 @@ function ProgramCard({
     setBusy(true);
     try {
       await duplicateProgram(program.id, { name: `${full.name} (copie)` });
+      onChanged();
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleActivate = async () => {
+    if (isActive) return;
+    setActivating(true);
+    try {
+      await onActivate();
+      setExpanded(true);
+    } finally {
+      setActivating(false);
     }
   };
 
@@ -193,14 +246,26 @@ function ProgramCard({
   };
 
   return (
-    <Card style={{ marginBottom: spacing.lg }}>
-      <View style={styles.cardHeader}>
+    <Card style={[{ marginBottom: spacing.lg }, isActive && styles.activeCard]}>
+      <Pressable
+        onPress={() => setExpanded((v) => !v)}
+        style={styles.cardHeader}
+      >
+        <Text style={styles.chevronToggle}>{expanded ? '▼' : '▶'}</Text>
         {renaming ? (
           <Input style={{ flex: 1 }} value={nameDraft} onChangeText={setNameDraft} autoFocus onSubmitEditing={handleRenameProgram} />
         ) : (
-          <Pressable style={{ flex: 1 }} onPress={() => isCoach && setRenaming(true)} disabled={!isCoach}>
-            <SectionTitle style={{ marginBottom: 0 }} icon="🏋️">{full.name}{isCoach ? ' ✎' : ''}</SectionTitle>
-          </Pressable>
+          <View style={{ flex: 1 }}>
+            <View style={styles.titleRow}>
+              <SectionTitle style={{ marginBottom: 0 }} icon="🏋️">{full.name}</SectionTitle>
+              {isActive ? <Badge label="ACTUELLE" color={colors.success} /> : null}
+            </View>
+            <Text style={styles.collapsedMeta}>
+              {sortedSessions.length} séance{sortedSessions.length > 1 ? 's' : ''}
+              {totalExercises > 0 ? ` · ${totalExercises} exercices` : ''}
+              {!expanded ? ' · appuyer pour déplier' : ''}
+            </Text>
+          </View>
         )}
         {!renaming && (
           <View style={styles.headerActions}>
@@ -214,101 +279,125 @@ function ProgramCard({
           </View>
         )}
         {renaming && <Button title="OK" onPress={handleRenameProgram} loading={busy} style={styles.smallBtn} />}
-      </View>
+      </Pressable>
 
-      {(full.sessions ?? []).length > 0 && (
-        <View style={styles.statsRow}>
-          <StatPill value={totalExercises} label="Exercices" />
-          <StatPill value={totalSeries} label="Séries" />
-          <StatPill value={sortedSessions.length} label="Séances/sem." />
-        </View>
-      )}
+      {(!readOnly || isCoach) && !isActive ? (
+        <Button
+          title="★ Définir comme actuelle"
+          variant="secondary"
+          onPress={handleActivate}
+          loading={activating}
+          style={{ marginBottom: expanded ? spacing.md : 0 }}
+        />
+      ) : null}
 
-      <RecapModal visible={recapOpen} onClose={() => setRecapOpen(false)} programName={full.name} sessions={sortedSessions} />
+      {isCoach && !renaming ? (
+        <Pressable onPress={() => setRenaming(true)} style={{ marginBottom: expanded ? spacing.sm : 0 }}>
+          <Text style={styles.renameHint}>✎ Renommer le programme</Text>
+        </Pressable>
+      ) : null}
 
-      {(full.sessions ?? []).length === 0 ? (
-        <Text style={styles.mutedText}>Aucune séance dans ce programme.</Text>
-      ) : (
-        (full.sessions ?? []).map((session) => {
-          const isToday = session.day_of_week === TODAY_DOW;
-          const isEditing = editingSessionId === session.id;
-          return (
-            <View key={session.id} style={[styles.sessionRow, isToday && styles.sessionRowToday]}>
-              <View style={[styles.dayBar, isToday && styles.dayBarToday]} />
-              <Pressable style={{ flex: 1 }} onPress={() => !isEditing && onPressSession(session.id)}>
-                <View style={styles.dayLabelRow}>
-                  <Text style={[styles.dayLabel, isToday && styles.dayLabelToday]}>{DAY_NAMES[session.day_of_week]}</Text>
-                  {isToday && <Badge label="AUJOURD'HUI" color={colors.primary} />}
-                </View>
-                {isEditing ? (
-                  <Input
-                    value={sessionNameDraft}
-                    onChangeText={setSessionNameDraft}
-                    autoFocus
-                    onSubmitEditing={() => handleRenameSession(session.id)}
-                    style={{ marginTop: spacing.xs }}
-                  />
-                ) : (
-                  <Text style={styles.sessionName}>{session.session_name}</Text>
-                )}
-                <View style={styles.chipRow}>
-                  {session.exercises.slice(0, 4).map((ex) => (
-                    <Badge key={ex.id} label={ex.name} color={muscleColors[ex.muscle ?? ''] ?? colors.primary} />
-                  ))}
-                  {session.exercises.length > 4 ? <Badge label={`+${session.exercises.length - 4}`} color={colors.textMuted} /> : null}
-                  {session.exercises.length === 0 ? <Text style={styles.emptySession}>Aucun exercice — appuyer pour ajouter</Text> : null}
-                </View>
-              </Pressable>
-              {isCoach ? (
-                isEditing ? (
-                  <Button title="OK" onPress={() => handleRenameSession(session.id)} style={styles.smallBtn} />
-                ) : (
-                  <View style={styles.sessionActions}>
-                    <Pressable onPress={() => { setSessionNameDraft(session.session_name ?? ''); setEditingSessionId(session.id); }}>
-                      <Text style={styles.sessionActionIcon}>✎</Text>
-                    </Pressable>
-                    <Pressable onPress={() => handleDeleteSession(session.id)}>
-                      <Text style={styles.sessionActionIcon}>🗑️</Text>
-                    </Pressable>
-                  </View>
-                )
-              ) : session.exercises.length > 0 ? (
-                <Pressable onPress={() => onPressSession(session.id)} style={styles.startBtnWrap}>
-                  <LinearGradient
-                    colors={isToday ? gradients.primary : [colors.surfaceHi, colors.surfaceHi]}
-                    style={styles.startBtn}
-                  >
-                    <Text style={[styles.startBtnText, !isToday && { color: colors.text }]}>
-                      {isToday ? '🔥 Démarrer' : 'Logger ›'}
-                    </Text>
-                  </LinearGradient>
-                </Pressable>
-              ) : (
-                <Text style={styles.chevron}>›</Text>
-              )}
+      {!expanded ? null : (
+        <>
+          {(full.sessions ?? []).length > 0 && (
+            <View style={styles.statsRow}>
+              <StatPill value={totalExercises} label="Exercices" />
+              <StatPill value={totalSeries} label="Séries" />
+              <StatPill value={sortedSessions.length} label="Séances/sem." />
             </View>
-          );
-        })
+          )}
+
+          <RecapModal visible={recapOpen} onClose={() => setRecapOpen(false)} programName={full.name} sessions={sortedSessions} />
+
+          {(full.sessions ?? []).length === 0 ? (
+            <Text style={styles.mutedText}>Aucune séance dans ce programme.</Text>
+          ) : (
+            (full.sessions ?? []).map((session) => {
+              const isToday = session.day_of_week === TODAY_DOW;
+              const isEditing = editingSessionId === session.id;
+              return (
+                <View key={session.id} style={[styles.sessionRow, isToday && styles.sessionRowToday]}>
+                  <View style={[styles.dayBar, isToday && styles.dayBarToday]} />
+                  <Pressable style={{ flex: 1 }} onPress={() => !isEditing && onPressSession(session.id)}>
+                    <View style={styles.dayLabelRow}>
+                      <Text style={[styles.dayLabel, isToday && styles.dayLabelToday]}>{DAY_NAMES[session.day_of_week]}</Text>
+                      {isToday && <Badge label="AUJOURD'HUI" color={colors.primary} />}
+                    </View>
+                    {isEditing ? (
+                      <Input
+                        value={sessionNameDraft}
+                        onChangeText={setSessionNameDraft}
+                        autoFocus
+                        onSubmitEditing={() => handleRenameSession(session.id)}
+                        style={{ marginTop: spacing.xs }}
+                      />
+                    ) : (
+                      <Text style={styles.sessionName}>{session.session_name}</Text>
+                    )}
+                    <View style={styles.chipRow}>
+                      {session.exercises.slice(0, 4).map((ex) => (
+                        <Badge key={ex.id} label={ex.name} color={muscleColors[ex.muscle ?? ''] ?? colors.primary} />
+                      ))}
+                      {session.exercises.length > 4 ? <Badge label={`+${session.exercises.length - 4}`} color={colors.textMuted} /> : null}
+                      {session.exercises.length === 0 ? <Text style={styles.emptySession}>Aucun exercice — appuyer pour ajouter</Text> : null}
+                    </View>
+                  </Pressable>
+                  {isCoach ? (
+                    isEditing ? (
+                      <Button title="OK" onPress={() => handleRenameSession(session.id)} style={styles.smallBtn} />
+                    ) : (
+                      <View style={styles.sessionActions}>
+                        <Pressable onPress={() => { setSessionNameDraft(session.session_name ?? ''); setEditingSessionId(session.id); }}>
+                          <Text style={styles.sessionActionIcon}>✎</Text>
+                        </Pressable>
+                        <Pressable onPress={() => handleDeleteSession(session.id)}>
+                          <Text style={styles.sessionActionIcon}>🗑️</Text>
+                        </Pressable>
+                      </View>
+                    )
+                  ) : session.exercises.length > 0 ? (
+                    <Pressable onPress={() => onPressSession(session.id)} style={styles.startBtnWrap}>
+                      <LinearGradient
+                        colors={isToday ? gradients.primary : [colors.surfaceHi, colors.surfaceHi]}
+                        style={styles.startBtn}
+                      >
+                        <Text style={[styles.startBtnText, !isToday && { color: colors.text }]}>
+                          {isToday ? '🔥 Attaquer' : 'Attaquer ›'}
+                        </Text>
+                      </LinearGradient>
+                    </Pressable>
+                  ) : (
+                    <Text style={styles.chevron}>›</Text>
+                  )}
+                </View>
+              );
+            })
+          )}
+
+          {isCoach && (
+            addingSession ? (
+              <View style={styles.dayPicker}>
+                {DAY_NAMES_SHORT.map((label, day) => (
+                  <Pressable
+                    key={day}
+                    onPress={() => !usedDays.has(day) && handleAddDay(day)}
+                    disabled={usedDays.has(day)}
+                    style={[styles.dayChip, usedDays.has(day) && styles.dayChipDisabled]}
+                  >
+                    <Text style={styles.dayChipText}>{savingDay === day ? '…' : label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : (
+              <Button title="+ Ajouter une séance" variant="secondary" onPress={() => setAddingSession(true)} style={{ marginTop: spacing.md }} />
+            )
+          )}
+        </>
       )}
 
-      {isCoach && (
-        addingSession ? (
-          <View style={styles.dayPicker}>
-            {DAY_NAMES_SHORT.map((label, day) => (
-              <Pressable
-                key={day}
-                onPress={() => !usedDays.has(day) && handleAddDay(day)}
-                disabled={usedDays.has(day)}
-                style={[styles.dayChip, usedDays.has(day) && styles.dayChipDisabled]}
-              >
-                <Text style={styles.dayChipText}>{savingDay === day ? '…' : label}</Text>
-              </Pressable>
-            ))}
-          </View>
-        ) : (
-          <Button title="+ Ajouter une séance" variant="secondary" onPress={() => setAddingSession(true)} style={{ marginTop: spacing.md }} />
-        )
-      )}
+      {!expanded ? (
+        <RecapModal visible={recapOpen} onClose={() => setRecapOpen(false)} programName={full.name} sessions={sortedSessions} />
+      ) : null}
     </Card>
   );
 }
@@ -360,9 +449,18 @@ function RecapModal({
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.lg, paddingBottom: spacing.xxl },
+  hintText: {
+    color: colors.textMuted, fontSize: fontSize.sm, fontWeight: '600',
+    marginBottom: spacing.md, lineHeight: 20,
+  },
   row: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center' },
   createBtn: { paddingHorizontal: spacing.lg },
+  activeCard: { borderColor: colors.success, borderWidth: 1.5 },
   cardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.xs, gap: spacing.xs },
+  chevronToggle: { color: colors.textMuted, fontSize: 12, fontWeight: '900', width: 16 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },
+  collapsedMeta: { color: colors.textFaint, fontSize: fontSize.xs, fontWeight: '600', marginTop: 2 },
+  renameHint: { color: colors.textMuted, fontSize: fontSize.xs, fontWeight: '700' },
   headerActions: { flexDirection: 'row', gap: spacing.xs },
   smallBtn: { paddingVertical: spacing.xs, paddingHorizontal: spacing.sm },
   sessionActions: { flexDirection: 'row', gap: spacing.sm, paddingLeft: spacing.xs },

@@ -60,6 +60,7 @@ export default function HomeScreen() {
       {data.today_session ? (
         <LinearGradient colors={gradients.primary} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.heroCard, shadow.glow]}>
           <Text style={styles.heroLabel}>🔥 SÉANCE DU JOUR</Text>
+          {data.program?.name ? <Text style={styles.heroProgram}>{data.program.name}</Text> : null}
           <Text style={styles.heroTitle}>{data.today_session.session_name}</Text>
           <View style={styles.chipRow}>
             {data.today_session.exercises.slice(0, 5).map((ex) => (
@@ -85,7 +86,9 @@ export default function HomeScreen() {
 
       {data.week_sessions.length > 0 && (
         <Card style={{ marginTop: spacing.lg }}>
-          <SectionTitle icon="🗓️">Ma semaine</SectionTitle>
+          <SectionTitle icon="🗓️">
+            Ma semaine{data.program?.name ? ` — ${data.program.name}` : ''}
+          </SectionTitle>
           {data.week_sessions.map((s) => (
             <Pressable
               key={s.id}
@@ -106,10 +109,10 @@ export default function HomeScreen() {
               </View>
               {s.is_today ? (
                 <View style={styles.weekCta}>
-                  <Text style={styles.weekCtaText}>Démarrer ›</Text>
+                  <Text style={styles.weekCtaText}>Attaquer ›</Text>
                 </View>
               ) : (
-                <Text style={styles.chevronMuted}>Logger ›</Text>
+                <Text style={styles.chevronMuted}>Attaquer ›</Text>
               )}
             </Pressable>
           ))}
@@ -192,6 +195,7 @@ const styles = StyleSheet.create({
   logoutBtn: { paddingHorizontal: spacing.sm, paddingVertical: spacing.xs },
   heroCard: { borderRadius: radius.lg, padding: spacing.lg },
   heroLabel: { color: 'rgba(255,255,255,0.85)', fontSize: fontSize.xs, fontWeight: '800', letterSpacing: 1 },
+  heroProgram: { color: 'rgba(255,255,255,0.75)', fontSize: fontSize.xs, fontWeight: '700', marginTop: 4 },
   heroTitle: { color: '#fff', fontSize: fontSize.xl, fontWeight: '900', marginTop: spacing.xs, marginBottom: spacing.md },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   heroChip: { backgroundColor: 'rgba(0,0,0,0.25)', paddingHorizontal: spacing.sm, paddingVertical: 5, borderRadius: radius.pill },

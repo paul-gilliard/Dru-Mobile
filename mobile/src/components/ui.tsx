@@ -103,12 +103,13 @@ export function Button({ title, onPress, variant = 'primary', disabled, loading,
   );
 }
 
-export function Input(props: TextInputProps) {
+export function Input({ style, ...rest }: TextInputProps) {
   return (
     <TextInput
       placeholderTextColor={colors.textFaint}
-      style={[styles.input, props.style]}
-      {...props}
+      {...rest}
+      // style AFTER {...rest} so callers can't wipe text color / background
+      style={[styles.input, style]}
     />
   );
 }
