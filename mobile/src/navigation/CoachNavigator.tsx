@@ -13,7 +13,6 @@ import CoachMoreScreen from '../screens/coach/CoachMoreScreen';
 import UsersScreen from '../screens/coach/UsersScreen';
 import WeeklyBilanScreen from '../screens/coach/WeeklyBilanScreen';
 import SessionDetailScreen from '../screens/athlete/SessionDetailScreen';
-import AvailabilityScreen from '../screens/athlete/AvailabilityScreen';
 
 const Stack = createNativeStackNavigator<CoachStackParamList>();
 const Tab = createBottomTabNavigator();
@@ -43,7 +42,7 @@ function DashboardStack() {
 function ExerciseBankStack() {
   return (
     <Stack.Navigator screenOptions={stackScreenOptions}>
-      <Stack.Screen name="Dashboard" component={ExerciseBankScreen} options={{ title: 'Banque d\'exercices' }} />
+      <Stack.Screen name="Dashboard" component={ExerciseBankScreen} options={{ title: "Banque d'exercices" }} />
     </Stack.Navigator>
   );
 }
@@ -51,15 +50,15 @@ function ExerciseBankStack() {
 function FoodBankStack() {
   return (
     <Stack.Navigator screenOptions={stackScreenOptions}>
-      <Stack.Screen name="Dashboard" component={FoodBankScreen} options={{ title: 'Banque d\'aliments' }} />
+      <Stack.Screen name="Dashboard" component={FoodBankScreen} options={{ title: "Banque d'aliments" }} />
     </Stack.Navigator>
   );
 }
 
-function AvailabilityStack() {
+function BilanStack() {
   return (
     <Stack.Navigator screenOptions={stackScreenOptions}>
-      <Stack.Screen name="Dashboard" component={AvailabilityScreen} options={{ title: 'Disponibilités' }} />
+      <Stack.Screen name="WeeklyBilan" component={WeeklyBilanScreen} options={{ title: 'Easy Bilan' }} />
     </Stack.Navigator>
   );
 }
@@ -69,7 +68,6 @@ function MoreStack() {
     <Stack.Navigator screenOptions={stackScreenOptions}>
       <Stack.Screen name="Dashboard" component={CoachMoreScreen} options={{ title: 'Plus' }} />
       <Stack.Screen name="Users" component={UsersScreen} options={{ title: 'Utilisateurs' }} />
-      <Stack.Screen name="WeeklyBilan" component={WeeklyBilanScreen} options={{ title: 'Bilan Hebdo' }} />
     </Stack.Navigator>
   );
 }
@@ -92,7 +90,7 @@ export default function CoachNavigator() {
       <Tab.Screen name="DashboardTab" component={DashboardStack} options={{ title: 'Athlètes', tabBarIcon: () => <TabIcon emoji="👥" /> }} />
       <Tab.Screen name="ExercisesTab" component={ExerciseBankStack} options={{ title: 'Exercices', tabBarIcon: () => <TabIcon emoji="🏋️" /> }} />
       <Tab.Screen name="FoodsTab" component={FoodBankStack} options={{ title: 'Aliments', tabBarIcon: () => <TabIcon emoji="🍎" /> }} />
-      <Tab.Screen name="AvailabilityTab" component={AvailabilityStack} options={{ title: 'Dispo', tabBarIcon: () => <TabIcon emoji="🗓️" /> }} />
+      <Tab.Screen name="BilanTab" component={BilanStack} options={{ title: 'Easy Bilan', tabBarIcon: () => <TabIcon emoji="📈" /> }} />
       <Tab.Screen name="MoreTab" component={MoreStack} options={{ title: 'Plus', tabBarIcon: () => <TabIcon emoji="☰" /> }} />
     </Tab.Navigator>
   );

@@ -28,9 +28,10 @@ type TabKey = typeof TABS[number]['key'];
 export default function AthleteDetailScreen() {
   const { params } = useRoute<Route>();
   const [active, setActive] = useState<TabKey>('program');
+  const athleteId = Number(params.athleteId);
 
   return (
-    <AthleteScopeProvider athleteId={params.athleteId} athleteName={params.athleteName} readOnly>
+    <AthleteScopeProvider athleteId={athleteId} athleteName={params.athleteName} readOnly>
       <View style={styles.screen}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsBar} contentContainerStyle={styles.tabsContent}>
           {TABS.map((tab) => {

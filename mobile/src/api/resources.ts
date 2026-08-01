@@ -1,9 +1,10 @@
 import { apiClient } from './client';
 import {
-  AthleteDashboardDTO, AttentionPanelDTO, AvailabilityDTO, CoachDashboardDTO, DashboardDTO, ExerciseBankDTO,
-  FoodDTO, JournalEntryDTO, JournalTrendDTO, MealPlanDTO, ObjectiveDTO, PerformanceEntryDTO,
-  ProgramDTO, ProgramSessionDTO, RegularityPointDTO, RemarkDTO, TonnageByMuscleDTO, UserDTO,
-  WeeklyBilanEntryDTO, WeeklyComparisonDTO,
+  AthleteDashboardDTO, AttentionPanelDTO, AvailabilityDTO, CoachDashboardDTO, DailyActivityDTO, DashboardDTO,
+  ExerciseBankDTO, ExerciseHistoryDTO, ExerciseEntryDTO, FoodDTO, JournalEntryDTO, JournalTrendDTO, MealPlanDTO,
+  MuscleExercisesDTO, ObjectiveDTO, PerformanceEntryDTO, ProgramDTO, ProgramSessionDTO, RegularityPointDTO,
+  RemarkDTO, SeriesBreakdownDTO, StatsExerciseDTO, TonnageByMuscleDTO, UserDTO, WeeklyBilanEntryDTO,
+  WeeklyComparisonDTO, WeeklyOverviewDTO,
 } from './types';
 
 export async function getDashboard() {
@@ -277,6 +278,7 @@ export async function setMealTime(planId: number, mealNumber: number, time: stri
 export async function getTonnageByMuscle(athleteId: number, days = 30) {
   const { data } = await apiClient.get<TonnageByMuscleDTO>('/stats/tonnage-by-muscle', {
     params: { athlete_id: athleteId, days },
+    timeout: 30000,
   });
   return data;
 }
@@ -284,6 +286,7 @@ export async function getTonnageByMuscle(athleteId: number, days = 30) {
 export async function getJournalTrend(athleteId: number, days = 30) {
   const { data } = await apiClient.get<JournalTrendDTO[]>('/stats/journal-trend', {
     params: { athlete_id: athleteId, days },
+    timeout: 30000,
   });
   return data;
 }
@@ -306,6 +309,7 @@ export async function unmarkWeeklyBilan(athleteId: number, weekStart?: string) {
 export async function getAttentionPanel(athleteId: number, weekA = 0, weekB = 1) {
   const { data } = await apiClient.get<AttentionPanelDTO>('/coach/attention-panel', {
     params: { athlete_id: athleteId, week_a: weekA, week_b: weekB },
+    timeout: 30000,
   });
   return data;
 }
@@ -313,6 +317,7 @@ export async function getAttentionPanel(athleteId: number, weekA = 0, weekB = 1)
 export async function getWeeklyComparison(athleteId: number, weekA = 0, weekB = 1) {
   const { data } = await apiClient.get<WeeklyComparisonDTO>('/stats/weekly-comparison', {
     params: { athlete_id: athleteId, week_a: weekA, week_b: weekB },
+    timeout: 30000,
   });
   return data;
 }
@@ -320,6 +325,62 @@ export async function getWeeklyComparison(athleteId: number, weekA = 0, weekB = 
 export async function getRegularity(athleteId: number, weeks = 4) {
   const { data } = await apiClient.get<RegularityPointDTO[]>('/stats/regularity', {
     params: { athlete_id: athleteId, weeks },
+    timeout: 30000,
+  });
+  return data;
+}
+
+export async function getWeeklyOverview(athleteId: number, weeks = 8) {
+  const { data } = await apiClient.get<WeeklyOverviewDTO>('/stats/weekly-overview', {
+    params: { athlete_id: athleteId, weeks },
+    timeout: 45000,
+  });
+  return data;
+}
+
+export async function getStatsExercises(athleteId: number) {
+  const { data } = await apiClient.get<StatsExerciseDTO[]>('/stats/exercises', {
+    params: { athlete_id: athleteId },
+    timeout: 30000,
+  });
+  return data;
+}
+
+export async function getExercisesByMuscle(athleteId: number) {
+  const { data } = await apiClient.get<MuscleExercisesDTO[]>('/stats/exercises-by-muscle', {
+    params: { athlete_id: athleteId },
+    timeout: 30000,
+  });
+  return data;
+}
+
+export async function getExerciseHistory(athleteId: number, exercise: string, days = 90) {
+  const { data } = await apiClient.get<ExerciseHistoryDTO>('/stats/exercise-history', {
+    params: { athlete_id: athleteId, exercise, days },
+    timeout: 30000,
+  });
+  return data;
+}
+
+export async function getSeriesBreakdown(params: {
+  athlete_id: number;
+  start: string;
+  end: string;
+  group?: 'day' | 'week' | 'month';
+  muscle?: string;
+  exercise?: string;
+}) {
+  const { data } = await apiClient.get<SeriesBreakdownDTO>('/stats/series-breakdown', {
+    params,
+    timeout: 45000,
+  });
+  return data;
+}
+
+export async function getDailyActivity(athleteId: number, days = 90) {
+  const { data } = await apiClient.get<DailyActivityDTO[]>('/stats/daily-activity', {
+    params: { athlete_id: athleteId, days },
+    timeout: 30000,
   });
   return data;
 }
@@ -327,6 +388,7 @@ export async function getRegularity(athleteId: number, weeks = 4) {
 export async function getRemarks(athleteId: number, limit = 30) {
   const { data } = await apiClient.get<RemarkDTO[]>('/performance/remarks', {
     params: { athlete_id: athleteId, limit },
+    timeout: 30000,
   });
   return data;
 }

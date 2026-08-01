@@ -10,9 +10,8 @@ import { CoachStackParamList } from '../../navigation/types';
 
 type Nav = NativeStackNavigationProp<CoachStackParamList, 'Dashboard'>;
 
-const MENU_ITEMS: { label: string; icon: string; screen: 'Users' | 'WeeklyBilan' }[] = [
+const MENU_ITEMS: { label: string; icon: string; screen: 'Users' }[] = [
   { label: 'Utilisateurs', icon: '👥', screen: 'Users' },
-  { label: 'Easy Bilan Hebdo', icon: '📈', screen: 'WeeklyBilan' },
 ];
 
 export default function CoachMoreScreen() {

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { getWeeklyComparison } from '../api/resources';
 import { apiErrorMessage } from '../api/client';
@@ -59,21 +59,27 @@ export default function WeeklyComparisonCard({
   const [error, setError] = useState<string | null>(null);
   const [openMuscle, setOpenMuscle] = useState<MuscleComparisonRowDTO | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      setError(null);
-      const res = await getWeeklyComparison(athleteId, weekA, weekB);
-      setData(res);
-    } catch (err) {
-      setError(apiErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    (async () => {
+      try {
+        const res = await getWeeklyComparison(athleteId, weekA, weekB);
+        if (!cancelled) setData(res);
+      } catch (err) {
+        if (!cancelled) {
+          setError(apiErrorMessage(err));
+          setData(null);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, [athleteId, weekA, weekB]);
 
-  useEffect(() => { setLoading(true); load(); }, [load]);
-
-  if (loading) {
+  if (loading && !data) {
     return <Card style={{ marginBottom: spacing.lg, alignItems: 'center', paddingVertical: spacing.lg }}><ActivityIndicator color={colors.primary} /></Card>;
   }
   if (error || !data) {
@@ -81,7 +87,7 @@ export default function WeeklyComparisonCard({
   }
 
   return (
-    <Card style={{ marginBottom: spacing.lg }}>
+    <Card style={{ marginBottom: spacing.lg, opacity: loading ? 0.7 : 1 }}>
       <SectionTitle icon="📊">Comparaison hebdomadaire ({data.week_a.label} vs {data.week_b.label})</SectionTitle>
       <View style={styles.tableHeaderRow}>
         <Text style={[styles.tableCell, styles.tableHeaderText, { flex: 2 }]}>Métrique</Text>

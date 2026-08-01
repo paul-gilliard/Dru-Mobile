@@ -66,6 +66,10 @@ function AthleteBilanCard({ entry, onToggle }: { entry: WeeklyBilanEntryDTO; onT
   const [expanded, setExpanded] = useState(!entry.done);
   const [weeks, setWeeks] = useState<{ a: number; b: number }>({ a: 0, b: 1 });
 
+  const handleWeeksChange = useCallback((a: number, b: number) => {
+    setWeeks((prev) => (prev.a === a && prev.b === b ? prev : { a, b }));
+  }, []);
+
   return (
     <Card style={{ marginBottom: spacing.lg }} glow={!entry.done}>
       <Pressable onPress={() => setExpanded((e) => !e)} style={styles.headerRow}>
@@ -88,7 +92,7 @@ function AthleteBilanCard({ entry, onToggle }: { entry: WeeklyBilanEntryDTO; onT
 
       {expanded && (
         <View style={{ marginTop: spacing.md }}>
-          <AttentionPanel athleteId={entry.athlete.id} onWeeksChange={(a, b) => setWeeks({ a, b })} />
+          <AttentionPanel athleteId={entry.athlete.id} onWeeksChange={handleWeeksChange} />
           <WeeklyComparisonCard athleteId={entry.athlete.id} weekA={weeks.a} weekB={weeks.b} />
           <RemarksList athleteId={entry.athlete.id} limit={10} />
 

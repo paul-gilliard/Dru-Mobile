@@ -182,9 +182,98 @@ export interface TonnageByMuscleDTO {
 export interface JournalTrendDTO {
   date: string;
   weight: number | null;
+  protein?: number | null;
+  carbs?: number | null;
+  fats?: number | null;
   kcals: number | null;
+  water_ml?: number | null;
+  steps?: number | null;
   sleep_hours: number | null;
   energy: number | null;
+  stress?: number | null;
+  hunger?: number | null;
+}
+
+export interface WeeklyOverviewWeekDTO {
+  offset: number;
+  label: string;
+  start: string;
+  end: string;
+  sessions: number;
+  total_tonnage: number;
+  health: Record<string, number | null>;
+  muscles: { muscle: string; tonnage: number }[];
+}
+
+export interface WeeklyOverviewDTO {
+  weeks: WeeklyOverviewWeekDTO[];
+}
+
+export interface StatsExerciseDTO {
+  name: string;
+  muscle?: string;
+  last_date: string | null;
+  entries: number;
+  tonnage?: number;
+}
+
+export interface MuscleExercisesDTO {
+  muscle: string;
+  tonnage: number;
+  exercises: StatsExerciseDTO[];
+}
+
+export interface ExerciseSessionDTO {
+  date: string;
+  max_load: number | null;
+  avg_load: number | null;
+  avg_reps: number | null;
+  tonnage: number;
+  series_count: number;
+  series?: { series_number: number | null; reps: number | null; load: number | null; notes: string | null }[];
+}
+
+export interface ExerciseHistoryDTO {
+  exercise: string;
+  sessions: ExerciseSessionDTO[];
+}
+
+export interface SeriesBreakdownRowDTO {
+  date: string;
+  exercise: string;
+  muscle: string;
+  series_number: number | null;
+  reps: number | null;
+  load: number | null;
+  notes: string | null;
+  tonnage: number;
+}
+
+export interface SeriesBreakdownBucketDTO {
+  key: string;
+  label: string;
+  tonnage: number;
+  series_count: number;
+  series: SeriesBreakdownRowDTO[];
+}
+
+export interface SeriesBreakdownDTO {
+  start: string;
+  end: string;
+  group: 'day' | 'week' | 'month';
+  muscle: string | null;
+  exercise: string | null;
+  buckets: SeriesBreakdownBucketDTO[];
+  total_tonnage: number;
+  total_series: number;
+}
+
+export interface DailyActivityDTO {
+  date: string;
+  trained: boolean;
+  series_count: number;
+  exercise_count: number;
+  tonnage: number;
 }
 
 export interface WeeklyMetricDTO {

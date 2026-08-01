@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { getAttentionPanel } from '../api/resources';
 import { apiErrorMessage } from '../api/client';
-import { AttentionItemDTO, AttentionPanelDTO, AttentionVerdict } from '../api/types';
+import { AttentionItemDTO, AttentionPanelDTO } from '../api/types';
 import { colors, fontSize, radius, spacing } from '../theme';
 import { Card, SectionTitle } from './ui';
 
@@ -132,21 +132,34 @@ export default function AttentionPanel({
   const [data, setData] = useState<AttentionPanelDTO | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const onWeeksChangeRef = useRef(onWeeksChange);
+  onWeeksChangeRef.current = onWeeksChange;
 
-  const load = useCallback(async () => {
-    try {
-      setError(null);
-      const res = await getAttentionPanel(athleteId, weekA, weekB);
-      setData(res);
-    } catch (err) {
-      setError(apiErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
+  // Notify parent only when week offsets actually change (stable callback via ref).
+  useEffect(() => {
+    onWeeksChangeRef.current?.(weekA, weekB);
+  }, [weekA, weekB]);
+
+  // Ignore stale responses when the user switches weeks quickly.
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    (async () => {
+      try {
+        const res = await getAttentionPanel(athleteId, weekA, weekB);
+        if (!cancelled) setData(res);
+      } catch (err) {
+        if (!cancelled) {
+          setError(apiErrorMessage(err));
+          setData(null);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, [athleteId, weekA, weekB]);
-
-  useEffect(() => { setLoading(true); load(); }, [load]);
-  useEffect(() => { onWeeksChange?.(weekA, weekB); }, [weekA, weekB, onWeeksChange]);
 
   const aLabel = useMemo(() => weekLabel(weekA), [weekA]);
   const bLabel = useMemo(() => weekLabel(weekB), [weekB]);

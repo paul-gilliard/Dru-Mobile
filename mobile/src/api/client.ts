@@ -26,9 +26,17 @@ export function apiErrorMessage(error: unknown, fallback = 'Une erreur est surve
   if (axios.isAxiosError(error)) {
     const data = error.response?.data as { error?: string } | undefined;
     if (data?.error) return data.error;
+    if (error.code === 'ECONNABORTED' || /timeout/i.test(error.message)) {
+      return 'Le serveur met trop de temps à répondre. Réessaie dans un instant.';
+    }
     if (error.message === 'Network Error') {
       return "Impossible de contacter le serveur. Vérifie que le backend tourne et que l'IP configurée est correcte.";
     }
+    if (error.response?.status) {
+      return `Erreur serveur (${error.response.status}). Réessaie.`;
+    }
+    if (error.message) return error.message;
   }
+  if (error instanceof Error && error.message) return error.message;
   return fallback;
 }
