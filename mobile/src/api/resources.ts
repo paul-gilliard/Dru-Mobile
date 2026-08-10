@@ -1,4 +1,5 @@
 import { apiClient } from './client';
+import { cacheGet, cacheInvalidate, cacheSet } from '../utils/apiCache';
 import {
   AthleteDashboardDTO, AttentionPanelDTO, AvailabilityDTO, CoachDashboardDTO, DailyActivityDTO, DashboardDTO,
   ExerciseBankDTO, ExerciseHistoryDTO, ExerciseEntryDTO, FoodDTO, JournalEntryDTO, JournalTrendDTO, MealPlanDTO,
@@ -82,50 +83,92 @@ export async function setAvailability(payload: {
 }
 
 export async function listPrograms(athleteId: number) {
+  const key = `programs:${athleteId}`;
+  const cached = await cacheGet<ProgramDTO[]>(key, 5 * 60_000);
+  if (cached) {
+    void (async () => {
+      try {
+        const { data } = await apiClient.get<ProgramDTO[]>('/programs', { params: { athlete_id: athleteId } });
+        await cacheSet(key, data);
+      } catch { /* keep stale */ }
+    })();
+    return cached;
+  }
   const { data } = await apiClient.get<ProgramDTO[]>('/programs', { params: { athlete_id: athleteId } });
+  await cacheSet(key, data);
   return data;
 }
 
-export async function getProgram(programId: number) {
+export async function getProgram(programId: number, opts?: { force?: boolean }) {
+  const key = `program:${programId}`;
+  if (!opts?.force) {
+    const cached = await cacheGet<ProgramDTO>(key, 5 * 60_000);
+    if (cached) {
+      void (async () => {
+        try {
+          const { data } = await apiClient.get<ProgramDTO>(`/programs/${programId}`);
+          await cacheSet(key, data);
+        } catch { /* keep stale */ }
+      })();
+      return cached;
+    }
+  }
   const { data } = await apiClient.get<ProgramDTO>(`/programs/${programId}`);
+  await cacheSet(key, data);
   return data;
 }
 
 export async function createProgram(payload: { name: string; athlete_id: number }) {
   const { data } = await apiClient.post<ProgramDTO>('/programs', payload);
+  await cacheInvalidate('programs:');
+  if (data?.id) await cacheInvalidate(`program:${data.id}`);
   return data;
 }
 
 export async function deleteProgram(programId: number) {
   await apiClient.delete(`/programs/${programId}`);
+  await cacheInvalidate('programs:');
+  await cacheInvalidate(`program:${programId}`);
 }
 
 export async function renameProgram(programId: number, name: string) {
   const { data } = await apiClient.put<ProgramDTO>(`/programs/${programId}`, { name });
+  await cacheInvalidate('programs:');
+  await cacheInvalidate(`program:${programId}`);
   return data;
 }
 
 export async function activateProgram(programId: number) {
   const { data } = await apiClient.post<ProgramDTO>(`/programs/${programId}/activate`);
+  await cacheInvalidate('programs:');
+  await cacheInvalidate(`program:${programId}`);
   return data;
 }
 
 export async function duplicateProgram(programId: number, payload: { name?: string; athlete_id?: number } = {}) {
   const { data } = await apiClient.post<ProgramDTO>(`/programs/${programId}/duplicate`, payload);
+  await cacheInvalidate('programs:');
+  await cacheInvalidate(`program:${programId}`);
+  if (data?.id) await cacheInvalidate(`program:${data.id}`);
   return data;
 }
 
 export async function createSession(programId: number, payload: { day_of_week: number; session_name?: string }) {
   const { data } = await apiClient.post(`/programs/${programId}/sessions`, payload);
+  await cacheInvalidate('programs:');
+  await cacheInvalidate(`program:${programId}`);
   return data;
 }
 
 export async function deleteSession(sessionId: number) {
   await apiClient.delete(`/sessions/${sessionId}`);
+  await cacheInvalidate('programs:');
+  await cacheInvalidate('program:');
 }
 
 export async function renameSession(sessionId: number, sessionName: string) {
   const { data } = await apiClient.put<ProgramSessionDTO>(`/sessions/${sessionId}`, { session_name: sessionName });
+  await cacheInvalidate('program:');
   return data;
 }
 
@@ -181,29 +224,61 @@ export async function deleteJournal(id: number) {
 export async function listPerformance(params: {
   athlete_id: number; session_id?: number; exercise?: string; date?: string;
 }) {
+  const key = `perf:${params.athlete_id}:${params.session_id ?? ''}:${params.date ?? ''}:${params.exercise ?? ''}`;
+  const cached = await cacheGet<PerformanceEntryDTO[]>(key, 60_000);
+  if (cached) {
+    void (async () => {
+      try {
+        const { data } = await apiClient.get<PerformanceEntryDTO[]>('/performance', { params });
+        await cacheSet(key, data);
+      } catch { /* keep stale */ }
+    })();
+    return cached;
+  }
   const { data } = await apiClient.get<PerformanceEntryDTO[]>('/performance', { params });
+  await cacheSet(key, data);
   return data;
 }
 
 export async function lastPerformanceForExercise(athleteId: number, exercise: string) {
+  const key = `perfLast:${athleteId}:${exercise}`;
+  const cached = await cacheGet<PerformanceEntryDTO[]>(key, 2 * 60_000);
+  if (cached) {
+    void (async () => {
+      try {
+        const { data } = await apiClient.get<PerformanceEntryDTO[]>('/performance/last-for-exercise', {
+          params: { athlete_id: athleteId, exercise },
+        });
+        await cacheSet(key, data);
+      } catch { /* keep stale */ }
+    })();
+    return cached;
+  }
   const { data } = await apiClient.get<PerformanceEntryDTO[]>('/performance/last-for-exercise', {
     params: { athlete_id: athleteId, exercise },
   });
+  await cacheSet(key, data);
   return data;
 }
 
 export async function createPerformance(payload: Partial<PerformanceEntryDTO> & { athlete_id?: number }) {
   const { data } = await apiClient.post<PerformanceEntryDTO>('/performance', payload);
+  await cacheInvalidate(`perf:${payload.athlete_id ?? ''}`);
+  await cacheInvalidate('perfLast:');
   return data;
 }
 
 export async function updatePerformance(id: number, payload: Partial<PerformanceEntryDTO>) {
   const { data } = await apiClient.put<PerformanceEntryDTO>(`/performance/${id}`, payload);
+  await cacheInvalidate('perf:');
+  await cacheInvalidate('perfLast:');
   return data;
 }
 
 export async function deletePerformance(id: number) {
   await apiClient.delete(`/performance/${id}`);
+  await cacheInvalidate('perf:');
+  await cacheInvalidate('perfLast:');
 }
 
 export async function listFoods(query?: string) {

@@ -13,6 +13,7 @@ import CoachMoreScreen from '../screens/coach/CoachMoreScreen';
 import UsersScreen from '../screens/coach/UsersScreen';
 import WeeklyBilanScreen from '../screens/coach/WeeklyBilanScreen';
 import SessionDetailScreen from '../screens/athlete/SessionDetailScreen';
+import { useTabBarStyle } from './useTabBarStyle';
 
 const Stack = createNativeStackNavigator<CoachStackParamList>();
 const Tab = createBottomTabNavigator();
@@ -77,13 +78,14 @@ function TabIcon({ emoji }: { emoji: string }) {
 }
 
 export default function CoachNavigator() {
+  const tabBarStyle = useTabBarStyle();
   return (
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textFaint,
-        tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border, height: 66, paddingTop: 6, paddingBottom: 10 },
+        tabBarStyle,
         tabBarLabelStyle: { fontWeight: '700', fontSize: 11 },
       }}
     >

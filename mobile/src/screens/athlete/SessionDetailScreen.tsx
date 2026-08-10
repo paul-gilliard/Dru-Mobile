@@ -1,19 +1,23 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../context/AuthContext';
 import {
-  addExerciseEntry, createPerformance, deleteExerciseEntry, deletePerformance, getProgram,
+  addExerciseEntry, deleteExerciseEntry, getProgram,
   lastPerformanceForExercise, listExerciseBank, listPerformance, listPrograms,
-  updateExerciseEntry, updatePerformance,
+  updateExerciseEntry,
 } from '../../api/resources';
 import { apiErrorMessage } from '../../api/client';
 import { ExerciseEntryDTO, PerformanceEntryDTO, ProgramSessionDTO } from '../../api/types';
-import { Badge, Button, Card, ErrorView, Input, LoadingView, ProgressBar, SectionTitle } from '../../components/ui';
+import { Badge, Button, Card, ErrorView, InlineLoading, Input, LoadingView, ProgressBar, SectionTitle } from '../../components/ui';
 import { colors, fontSize, gradients, muscleColors, radius, shadow, spacing } from '../../theme';
 import { AthleteStackParamList } from '../../navigation/types';
 import { formatDateFR, isoDaysAgo, shiftLocalISO, todayISO } from '../../utils/format';
+import {
+  enqueueCreate, enqueueDelete, enqueueUpdate, flushPerfQueue, loadPerfQueue,
+  makeOptimisticEntry, nextTempId, subscribePerfQueue,
+} from '../../utils/offlinePerfQueue';
 
 type Route = RouteProp<AthleteStackParamList, 'SessionDetail'>;
 
@@ -65,6 +69,8 @@ export default function SessionDetailScreen() {
   const [dayEntries, setDayEntries] = useState<PerformanceEntryDTO[]>([]);
   const [priorDates, setPriorDates] = useState<{ date: string; count: number }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [priorLoading, setPriorLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Athlete must confirm log date before logging (unless coach read-only view).
@@ -74,21 +80,75 @@ export default function SessionDetailScreen() {
   );
   const [dateDraft, setDateDraft] = useState(params.logDate ?? todayISO());
 
-  const load = useCallback(async (date: string, sess: ProgramSessionDTO) => {
+  const load = useCallback(async (date: string, sess: ProgramSessionDTO, opts?: { silent?: boolean }) => {
     try {
-      setError(null);
+      if (!opts?.silent) {
+        setError(null);
+        setLogsLoading(true);
+      }
       const names = sess.exercises.map((e) => e.name);
       const [bySession, byDate] = await Promise.all([
         listPerformance({ athlete_id: athleteId, session_id: params.sessionId, date }),
         listPerformance({ athlete_id: athleteId, date }),
       ]);
-      setDayEntries(mergeDayLogs(params.sessionId, names, bySession, byDate));
+      let merged = mergeDayLogs(params.sessionId, names, bySession, byDate);
+      // Réinjecte les creates encore en file (offline / sync lente)
+      const pending = await loadPerfQueue();
+      for (const op of pending) {
+        if (op.op !== 'create') continue;
+        if (op.payload.athlete_id !== athleteId || op.payload.entry_date !== date) continue;
+        if (op.payload.exercise && !names.includes(op.payload.exercise)) continue;
+        const already = merged.some((e) => (
+          e.exercise === op.payload.exercise && e.series_number === op.payload.series_number
+        ));
+        if (!already) merged = [...merged, makeOptimisticEntry(op.tempId, op.payload)];
+      }
+      setDayEntries(merged);
     } catch (err) {
-      setError(apiErrorMessage(err));
+      if (!opts?.silent) setError(apiErrorMessage(err));
+    } finally {
+      if (!opts?.silent) setLogsLoading(false);
     }
   }, [athleteId, params.sessionId]);
 
+  const upsertDayEntry = useCallback((entry: PerformanceEntryDTO) => {
+    setDayEntries((prev) => {
+      const without = prev.filter((e) => {
+        if (e.id === entry.id) return false;
+        // remplace aussi une série locale même exercice/numéro
+        if (
+          entry.exercise === e.exercise
+          && entry.series_number != null
+          && e.series_number === entry.series_number
+          && entry.entry_date === e.entry_date
+        ) return false;
+        return true;
+      });
+      return [...without, entry].sort((a, b) => (a.series_number ?? 0) - (b.series_number ?? 0));
+    });
+  }, []);
+
+  const removeDayEntry = useCallback((id: number) => {
+    setDayEntries((prev) => prev.filter((e) => e.id !== id));
+  }, []);
+
+  const replaceTempIds = useCallback((replaced: { tempId: number; server: PerformanceEntryDTO }[]) => {
+    if (!replaced.length) return;
+    setDayEntries((prev) => prev.map((e) => {
+      const hit = replaced.find((r) => r.tempId === e.id);
+      return hit ? hit.server : e;
+    }));
+  }, []);
+
+  useEffect(() => {
+    void loadPerfQueue().then(() => flushPerfQueue());
+    return subscribePerfQueue((result) => {
+      if (result?.replaced?.length) replaceTempIds(result.replaced);
+    });
+  }, [replaceTempIds]);
+
   const loadPriorDates = useCallback(async (sess: ProgramSessionDTO) => {
+    setPriorLoading(true);
     try {
       const names = new Set(sess.exercises.map((e) => e.name));
       const [bySession, recent] = await Promise.all([
@@ -113,34 +173,47 @@ export default function SessionDetailScreen() {
       );
     } catch {
       setPriorDates([]);
+    } finally {
+      setPriorLoading(false);
     }
   }, [athleteId, params.sessionId]);
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         setLoading(true);
         const programs = await listPrograms(athleteId);
         let found: ProgramSessionDTO | null = null;
-        for (const p of programs) {
+        // Priorité : programme actif d'abord (souvent le bon)
+        const ordered = [
+          ...programs.filter((p) => p.is_active),
+          ...programs.filter((p) => !p.is_active),
+        ];
+        for (const p of ordered) {
           const detailed = await getProgram(p.id);
           found = detailed.sessions?.find((s) => s.id === params.sessionId) ?? null;
           if (found) {
-            setSession(found);
+            if (!cancelled) setSession(found);
             break;
           }
         }
         if (found) {
-          await loadPriorDates(found);
-          if (logDate) await load(logDate, found);
+          void loadPriorDates(found);
         }
       } catch (err) {
-        setError(apiErrorMessage(err));
+        if (!cancelled) setError(apiErrorMessage(err));
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
-  }, [athleteId, params.sessionId, load, loadPriorDates, logDate]);
+    return () => { cancelled = true; };
+  }, [athleteId, params.sessionId, loadPriorDates]);
+
+  useEffect(() => {
+    if (!session || !logDate) return;
+    void load(logDate, session);
+  }, [session, logDate, load]);
 
   if (loading && !session) return <LoadingView label="Chargement de la séance..." />;
   if (error && !session) return <ErrorView message={error} onRetry={() => session && logDate && load(logDate, session)} />;
@@ -163,7 +236,9 @@ export default function SessionDetailScreen() {
             Si tu as déjà logué cette séance un autre jour, choisis cette date pour retrouver ton historique.
           </Text>
 
-          {priorDates.length > 0 && (
+          {priorLoading ? (
+            <InlineLoading label="Recherche des logs passés…" style={{ paddingVertical: spacing.md }} />
+          ) : priorDates.length > 0 ? (
             <View style={styles.priorBox}>
               <Text style={styles.priorTitle}>Déjà logué sur cette séance</Text>
               <View style={styles.quickDates}>
@@ -180,7 +255,7 @@ export default function SessionDetailScreen() {
                 ))}
               </View>
             </View>
-          )}
+          ) : null}
 
           <View style={styles.datePickerRow}>
             <Pressable
@@ -284,21 +359,28 @@ export default function SessionDetailScreen() {
         <ProgressBar value={progress} color={progress >= 1 ? colors.success : colors.primary} />
       </View>
 
-      {session.exercises.map((exercise, idx) => (
-        <ExerciseCard
-          key={exercise.id}
-          index={idx + 1}
-          exercise={exercise}
-          athleteId={athleteId}
-          sessionId={session.id}
-          logDate={activeDate}
-          readOnly={readOnly}
-          isCoach={isCoach}
-          dayEntries={dayEntries.filter((e) => e.exercise === exercise.name)}
-          onLogged={() => load(activeDate, session)}
-          onDeleted={refreshSession}
-        />
-      ))}
+      {logsLoading && dayEntries.length === 0 ? (
+        <InlineLoading label="Chargement des performances…" />
+      ) : null}
+
+      <View style={{ opacity: logsLoading && dayEntries.length === 0 ? 0.45 : 1 }}>
+        {session.exercises.map((exercise, idx) => (
+          <ExerciseCard
+            key={exercise.id}
+            index={idx + 1}
+            exercise={exercise}
+            athleteId={athleteId}
+            sessionId={session.id}
+            logDate={activeDate}
+            readOnly={readOnly}
+            isCoach={isCoach}
+            dayEntries={dayEntries.filter((e) => e.exercise === exercise.name)}
+            onUpsert={upsertDayEntry}
+            onRemove={removeDayEntry}
+            onStructureChange={refreshSession}
+          />
+        ))}
+      </View>
       {isCoach && <AddExerciseForm sessionId={session.id} onAdded={refreshSession} />}
 
       {!readOnly && (
@@ -321,18 +403,23 @@ function FinishSessionButton({
   const missing = Math.max(0, totalSeries - doneSeries);
   const complete = missing === 0 && totalSeries > 0;
 
-  const handlePress = () => {
-    if (complete) {
-      if (Platform.OS === 'web') {
-        window.alert(`Séance terminée 💪\n\nBravo ! Tu as validé les ${doneSeries} séries de « ${sessionName} ».`);
-        onFinished();
-        return;
-      }
+  const finish = () => {
+    // Sync continues in background — don't block leaving the session
+    void loadPerfQueue().then(() => flushPerfQueue());
+    if (Platform.OS === 'web') {
+      window.alert(`Séance terminée 💪\n\nBravo ! Tu as validé les ${doneSeries} séries de « ${sessionName} ».`);
+    } else {
       Alert.alert(
         'Séance terminée 💪',
         `Bravo ! Tu as validé les ${doneSeries} séries de « ${sessionName} ».`,
-        [{ text: 'OK', onPress: onFinished }],
       );
+    }
+    onFinished();
+  };
+
+  const handlePress = () => {
+    if (complete) {
+      finish();
       return;
     }
 
@@ -341,7 +428,7 @@ function FinishSessionButton({
       : `Tu n’as validé que ${doneSeries}/${totalSeries} séries (${missing} manquante${missing > 1 ? 's' : ''}).\n\nEs-tu sûr de ne pas avoir fait toute la séance ?`;
 
     if (Platform.OS === 'web') {
-      if (window.confirm(`Séance incomplète\n\n${msg}`)) onFinished();
+      if (window.confirm(`Séance incomplète\n\n${msg}`)) finish();
       return;
     }
 
@@ -350,7 +437,7 @@ function FinishSessionButton({
       msg,
       [
         { text: 'Continuer à logger', style: 'cancel' },
-        { text: 'Terminer quand même', style: 'destructive', onPress: onFinished },
+        { text: 'Terminer quand même', style: 'destructive', onPress: finish },
       ],
     );
   };
@@ -375,6 +462,7 @@ function FinishSessionButton({
 
 function AddExerciseForm({ sessionId, onAdded }: { sessionId: number; onAdded: () => void }) {
   const [bankNames, setBankNames] = useState<string[]>([]);
+  const [bankLoading, setBankLoading] = useState(true);
   const [name, setName] = useState('');
   const [sets, setSets] = useState('4');
   const [reps, setReps] = useState('8-12');
@@ -383,7 +471,11 @@ function AddExerciseForm({ sessionId, onAdded }: { sessionId: number; onAdded: (
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    listExerciseBank().then((data) => setBankNames(data.exercises.map((e) => e.name))).catch(() => setBankNames([]));
+    setBankLoading(true);
+    listExerciseBank()
+      .then((data) => setBankNames(data.exercises.map((e) => e.name)))
+      .catch(() => setBankNames([]))
+      .finally(() => setBankLoading(false));
   }, []);
 
   const handleAdd = async () => {
@@ -406,7 +498,9 @@ function AddExerciseForm({ sessionId, onAdded }: { sessionId: number; onAdded: (
     <Card style={{ marginBottom: spacing.lg }}>
       <SectionTitle icon="➕">Ajouter un exercice</SectionTitle>
       <Input placeholder="Nom de l'exercice" value={name} onChangeText={setName} />
-      {bankNames.length > 0 && (
+      {bankLoading ? (
+        <InlineLoading label="Suggestions…" style={{ paddingVertical: spacing.sm }} />
+      ) : bankNames.length > 0 ? (
         <View style={styles.suggestionRow}>
           {bankNames.slice(0, 6).map((n) => (
             <Pressable key={n} onPress={() => setName(n)}>
@@ -414,7 +508,7 @@ function AddExerciseForm({ sessionId, onAdded }: { sessionId: number; onAdded: (
             </Pressable>
           ))}
         </View>
-      )}
+      ) : null}
       <View style={styles.formRow}>
         <Input style={styles.formInput} placeholder="Séries" keyboardType="numeric" value={sets} onChangeText={setSets} />
         <Input style={styles.formInput} placeholder="Reps (ex: 8-12)" value={reps} onChangeText={setReps} />
@@ -482,13 +576,17 @@ function EditExerciseForm({
 }
 
 function ExerciseCard({
-  exercise, index, athleteId, sessionId, logDate, readOnly, isCoach, dayEntries, onLogged, onDeleted,
+  exercise, index, athleteId, sessionId, logDate, readOnly, isCoach, dayEntries, onUpsert, onRemove, onStructureChange,
 }: {
   exercise: ExerciseEntryDTO; index: number; athleteId: number; sessionId: number; logDate: string;
   readOnly: boolean; isCoach: boolean;
-  dayEntries: PerformanceEntryDTO[]; onLogged: () => void; onDeleted: () => void;
+  dayEntries: PerformanceEntryDTO[];
+  onUpsert: (entry: PerformanceEntryDTO) => void;
+  onRemove: (id: number) => void;
+  onStructureChange: () => void;
 }) {
   const [history, setHistory] = useState<PerformanceEntryDTO[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [values, setValues] = useState<Record<number, { reps: string; load: string; note: string }>>({});
   const [noteOpenFor, setNoteOpenFor] = useState<number | null>(null);
   const [savingSeries, setSavingSeries] = useState<number | null>(null);
@@ -496,10 +594,14 @@ function ExerciseCard({
   const [editing, setEditing] = useState(false);
   const [editingSeries, setEditingSeries] = useState<number | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [syncHint, setSyncHint] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+    setHistoryLoading(true);
     lastPerformanceForExercise(athleteId, exercise.name)
       .then((entries) => {
+        if (cancelled) return;
         setHistory(entries);
         // Prefill empty series inputs from the most recent matching series
         setValues((prev) => {
@@ -518,7 +620,13 @@ function ExerciseCard({
           return next;
         });
       })
-      .catch(() => setHistory([]));
+      .catch(() => {
+        if (!cancelled) setHistory([]);
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryLoading(false);
+      });
+    return () => { cancelled = true; };
   }, [athleteId, exercise.name, exercise.series.length, exercise.sets]);
 
   const seriesList = exercise.series.length > 0
@@ -533,6 +641,7 @@ function ExerciseCard({
   const historyGroups = useMemo(() => groupHistoryByDate(history), [history]);
 
   const handleSave = async (seriesNumber: number, existing?: PerformanceEntryDTO | null) => {
+    if (savingSeries === seriesNumber) return;
     const last = getLastForSeries(seriesNumber);
     const v = values[seriesNumber] ?? { reps: '', load: '', note: '' };
     const repsStr = (v.reps || (existing?.reps != null ? String(existing.reps) : '') || (last?.reps != null ? String(last.reps) : '')).trim();
@@ -543,43 +652,67 @@ function ExerciseCard({
     }
     setSaveError(null);
     setSavingSeries(seriesNumber);
-    try {
-      const load = loadStr ? parseFloat(loadStr.replace(',', '.')) : undefined;
-      const reps = repsStr ? parseFloat(repsStr.replace(',', '.')) : undefined;
-      const notes = v.note?.trim() ? v.note.trim() : (existing?.notes ?? undefined);
 
-      if (existing?.id) {
-        await updatePerformance(existing.id, {
-          reps,
-          load,
+    const loadVal = loadStr ? parseFloat(loadStr.replace(',', '.')) : undefined;
+    const repsVal = repsStr ? parseFloat(repsStr.replace(',', '.')) : undefined;
+    const notes = v.note?.trim() ? v.note.trim() : (existing?.notes ?? undefined);
+
+    // UI immédiate — la requête part en async / file offline
+    try {
+      if (existing?.id && existing.id > 0) {
+        const optimistic: PerformanceEntryDTO = {
+          ...existing,
+          reps: repsVal ?? null,
+          load: loadVal ?? null,
+          notes: notes ?? null,
+          series_number: seriesNumber,
+        };
+        onUpsert(optimistic);
+        setNoteOpenFor(null);
+        setEditingSeries(null);
+        setSavingSeries(null);
+        if (loadVal && bestLastLoad && loadVal > bestLastLoad) setJustPR(seriesNumber);
+        setHistory((h) => [{ ...optimistic }, ...h.filter((e) => e.id !== optimistic.id)]);
+        setSyncHint(null);
+        void enqueueUpdate(existing.id, {
+          reps: repsVal ?? null,
+          load: loadVal ?? null,
           notes: notes || null,
           series_number: seriesNumber,
+        }).then(() => flushPerfQueue()).then((r) => {
+          if (!r.ok) setSyncHint('Enregistré localement — sync en cours…');
         });
-      } else {
-        await createPerformance({
-          athlete_id: athleteId,
-          program_session_id: sessionId,
-          entry_date: logDate,
-          exercise: exercise.name,
-          series_number: seriesNumber,
-          reps,
-          load,
-          notes: notes || undefined,
-        });
+        return;
       }
-      if (load && bestLastLoad && load > bestLastLoad) {
-        setJustPR(seriesNumber);
-      }
+
+      // Update d'une entrée encore temporaire (id < 0) : on recrée via queue create coalescée
+      const tempId = existing?.id && existing.id < 0 ? existing.id : nextTempId();
+      const payload = {
+        athlete_id: athleteId,
+        program_session_id: sessionId,
+        entry_date: logDate,
+        exercise: exercise.name,
+        series_number: seriesNumber,
+        reps: repsVal,
+        load: loadVal,
+        notes: notes || undefined,
+      };
+      const optimistic = makeOptimisticEntry(tempId, payload);
+      onUpsert(optimistic);
       setNoteOpenFor(null);
       setEditingSeries(null);
-      lastPerformanceForExercise(athleteId, exercise.name).then(setHistory).catch(() => undefined);
-      onLogged();
+      setSavingSeries(null);
+      if (loadVal && bestLastLoad && loadVal > bestLastLoad) setJustPR(seriesNumber);
+      setHistory((h) => [optimistic, ...h.filter((e) => !(e.series_number === seriesNumber && e.entry_date === logDate))]);
+      setSyncHint(null);
+      void enqueueCreate(payload, tempId).then(() => flushPerfQueue()).then((r) => {
+        if (!r.ok) setSyncHint('Enregistré localement — sync en cours…');
+      });
     } catch (err) {
       const msg = apiErrorMessage(err);
       setSaveError(msg);
-      Alert.alert('Erreur', msg);
-    } finally {
       setSavingSeries(null);
+      Alert.alert('Erreur', msg);
     }
   };
 
@@ -602,11 +735,10 @@ function ExerciseCard({
     const runDelete = async () => {
       try {
         setSaveError(null);
-        await deletePerformance(done.id);
+        onRemove(done.id);
         setEditingSeries((cur) => (cur === done.series_number ? null : cur));
         setNoteOpenFor((cur) => (cur === done.series_number ? null : cur));
-        lastPerformanceForExercise(athleteId, exercise.name).then(setHistory).catch(() => undefined);
-        onLogged();
+        void enqueueDelete(done.id).then(() => flushPerfQueue());
       } catch (err) {
         const msg = apiErrorMessage(err);
         setSaveError(msg);
@@ -699,7 +831,7 @@ function ExerciseCard({
             <Button
               title="✕"
               variant="ghost"
-              onPress={async () => { await deleteExerciseEntry(exercise.id); onDeleted(); }}
+              onPress={async () => { await deleteExerciseEntry(exercise.id); onStructureChange(); }}
               style={styles.deleteExerciseBtn}
             />
           </View>
@@ -709,7 +841,7 @@ function ExerciseCard({
         <EditExerciseForm
           exercise={exercise}
           onCancel={() => setEditing(false)}
-          onSaved={() => { setEditing(false); onDeleted(); }}
+          onSaved={() => { setEditing(false); onStructureChange(); }}
         />
       ) : (
         <>
@@ -721,7 +853,12 @@ function ExerciseCard({
         </>
       )}
 
-      {!readOnly && historyGroups.length > 0 && (
+      {!readOnly && historyLoading ? (
+        <View style={[styles.historyBox, styles.historyLoadingRow]}>
+          <ActivityIndicator color={colors.primary} size="small" />
+          <Text style={[styles.historyTitle, { marginBottom: 0 }]}>Chargement de l’historique…</Text>
+        </View>
+      ) : !readOnly && historyGroups.length > 0 ? (
         <View style={styles.historyBox}>
           <Text style={styles.historyTitle}>📈 Historique (surcharge)</Text>
           {historyGroups.map((g) => (
@@ -731,9 +868,10 @@ function ExerciseCard({
             </Text>
           ))}
         </View>
-      )}
+      ) : null}
 
       {saveError ? <Text style={styles.saveError}>{saveError}</Text> : null}
+      {syncHint ? <Text style={styles.syncHint}>{syncHint}</Text> : null}
 
       <View style={{ marginTop: spacing.md }}>
         {seriesList.map((s) => {
@@ -858,10 +996,12 @@ const styles = StyleSheet.create({
     marginTop: spacing.md, backgroundColor: colors.backgroundAlt, borderRadius: radius.md,
     padding: spacing.md, borderWidth: 1, borderColor: colors.border,
   },
+  historyLoadingRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   historyTitle: { color: colors.gold, fontWeight: '800', fontSize: fontSize.xs, marginBottom: spacing.sm, letterSpacing: 0.5 },
   historyLine: { color: colors.textMuted, fontSize: fontSize.xs, marginBottom: 4, lineHeight: 16 },
   historyDate: { color: colors.text, fontWeight: '700' },
   saveError: { color: colors.danger, fontSize: fontSize.sm, fontWeight: '700', marginTop: spacing.sm },
+  syncHint: { color: colors.warning, fontSize: fontSize.xs, fontWeight: '700', marginTop: spacing.xs },
   seriesRow: {
     flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm,
     borderTopWidth: 1, borderTopColor: colors.border, gap: spacing.sm,

@@ -123,6 +123,22 @@ export function LoadingView({ label }: { label?: string }) {
   );
 }
 
+/** Compact spinner for card / section async loads (not full-screen). */
+export function InlineLoading({
+  label,
+  style,
+}: {
+  label?: string;
+  style?: StyleProp<ViewStyle>;
+}) {
+  return (
+    <View style={[styles.inlineLoading, style]}>
+      <ActivityIndicator color={colors.primary} />
+      {label ? <Text style={styles.mutedText}>{label}</Text> : null}
+    </View>
+  );
+}
+
 export function ErrorView({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
     <View style={styles.centered}>
@@ -223,6 +239,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
+  inlineLoading: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.lg,
+    gap: spacing.sm,
+  },
   mutedText: { color: colors.textMuted, marginTop: spacing.sm, textAlign: 'center' },
   errorEmoji: { fontSize: 40, marginBottom: spacing.sm },
   errorText: { color: colors.danger, textAlign: 'center', fontSize: fontSize.md, fontWeight: '600' },

@@ -1,5 +1,5 @@
-import React, { useCallback, useState } from 'react';
-import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -7,11 +7,11 @@ import { useAuth } from '../../context/AuthContext';
 import { useAthleteScope } from '../../context/AthleteScopeContext';
 import {
   activateProgram, createProgram, createSession, deleteProgram, deleteSession, duplicateProgram, getProgram,
-  listPrograms, renameProgram, renameSession,
+  listAthletes, listPrograms, renameProgram, renameSession,
 } from '../../api/resources';
 import { apiErrorMessage } from '../../api/client';
-import { ProgramDTO } from '../../api/types';
-import { Badge, Button, Card, EmptyState, ErrorView, Input, LoadingView, SectionTitle } from '../../components/ui';
+import { ProgramDTO, UserDTO } from '../../api/types';
+import { Badge, Button, Card, EmptyState, ErrorView, InlineLoading, Input, LoadingView, SectionTitle } from '../../components/ui';
 import { colors, fontSize, gradients, muscleColors, radius, spacing } from '../../theme';
 import { AthleteStackParamList } from '../../navigation/types';
 import { DAY_NAMES, DAY_NAMES_SHORT, jsWeekdayToBackend } from '../../utils/format';
@@ -62,13 +62,27 @@ export default function ProgramScreen() {
     }
   };
 
-  const handleDeleteProgram = async (programId: number) => {
+  const runDeleteProgram = async (programId: number) => {
     try {
       await deleteProgram(programId);
       await load();
     } catch (err) {
-      setError(apiErrorMessage(err));
+      Alert.alert('Suppression impossible', apiErrorMessage(err));
     }
+  };
+
+  const handleDeleteProgram = (programId: number, programName: string) => {
+    const message = `Supprimer définitivement « ${programName} » ?`;
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.confirm(message)) {
+        void runDeleteProgram(programId);
+      }
+      return;
+    }
+    Alert.alert('Supprimer le programme', message, [
+      { text: 'Annuler', style: 'cancel' },
+      { text: 'Supprimer', style: 'destructive', onPress: () => { void runDeleteProgram(programId); } },
+    ]);
   };
 
   const handleActivateProgram = async (programId: number) => {
@@ -119,11 +133,12 @@ export default function ProgramScreen() {
             <ProgramCard
               key={program.id}
               program={program}
+              athleteId={athleteId}
               isCoach={isCoach}
               readOnly={readOnly}
               defaultExpanded={!!program.is_active || programs.length === 1 || (!anyActive && index === 0)}
               onPressSession={(sessionId) => navigation.navigate('SessionDetail', { sessionId, athleteId, readOnly })}
-              onDeleteProgram={() => handleDeleteProgram(program.id)}
+              onDeleteProgram={() => handleDeleteProgram(program.id, program.name)}
               onActivate={() => handleActivateProgram(program.id)}
               onChanged={load}
             />
@@ -135,9 +150,10 @@ export default function ProgramScreen() {
 }
 
 function ProgramCard({
-  program, isCoach, readOnly, defaultExpanded, onPressSession, onDeleteProgram, onActivate, onChanged,
+  program, athleteId, isCoach, readOnly, defaultExpanded, onPressSession, onDeleteProgram, onActivate, onChanged,
 }: {
   program: ProgramDTO;
+  athleteId: number;
   isCoach: boolean;
   readOnly: boolean;
   defaultExpanded: boolean;
@@ -157,27 +173,43 @@ function ProgramCard({
   const [editingSessionId, setEditingSessionId] = useState<number | null>(null);
   const [sessionNameDraft, setSessionNameDraft] = useState('');
   const [recapOpen, setRecapOpen] = useState(false);
+  const [dupOpen, setDupOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(() => !Array.isArray(program.sessions));
+  const detailsReadyRef = useRef(Array.isArray(program.sessions));
 
   const isActive = !!full.is_active;
+  const detailsReady = Array.isArray(full.sessions);
 
-  React.useEffect(() => {
+  useEffect(() => {
     setFull(program);
+    if (!Array.isArray(program.sessions) && !detailsReadyRef.current) {
+      setDetailLoading(true);
+    }
   }, [program]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     setExpanded(defaultExpanded);
   }, [defaultExpanded]);
 
+  useEffect(() => {
+    detailsReadyRef.current = Array.isArray(full.sessions);
+  }, [full.sessions]);
+
   const refresh = useCallback(async () => {
+    const needsSpinner = !detailsReadyRef.current;
+    if (needsSpinner) setDetailLoading(true);
     try {
-      const detailed = await getProgram(program.id);
+      const detailed = await getProgram(program.id, { force: needsSpinner });
       setFull(detailed);
+      detailsReadyRef.current = true;
     } catch {
       // silencieux : on garde les données déjà connues
+    } finally {
+      setDetailLoading(false);
     }
   }, [program.id]);
 
-  useFocusEffect(useCallback(() => { refresh(); }, [refresh]));
+  useFocusEffect(useCallback(() => { void refresh(); }, [refresh]));
 
   const usedDays = new Set((full.sessions ?? []).map((s) => s.day_of_week));
   const sortedSessions = [...(full.sessions ?? [])].sort((a, b) => a.day_of_week - b.day_of_week);
@@ -211,16 +243,6 @@ function ProgramCard({
     }
   };
 
-  const handleDuplicateProgram = async () => {
-    setBusy(true);
-    try {
-      await duplicateProgram(program.id, { name: `${full.name} (copie)` });
-      onChanged();
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const handleActivate = async () => {
     if (isActive) return;
     setActivating(true);
@@ -247,39 +269,41 @@ function ProgramCard({
 
   return (
     <Card style={[{ marginBottom: spacing.lg }, isActive && styles.activeCard]}>
-      <Pressable
-        onPress={() => setExpanded((v) => !v)}
-        style={styles.cardHeader}
-      >
-        <Text style={styles.chevronToggle}>{expanded ? '▼' : '▶'}</Text>
-        {renaming ? (
-          <Input style={{ flex: 1 }} value={nameDraft} onChangeText={setNameDraft} autoFocus onSubmitEditing={handleRenameProgram} />
-        ) : (
-          <View style={{ flex: 1 }}>
-            <View style={styles.titleRow}>
-              <SectionTitle style={{ marginBottom: 0 }} icon="🏋️">{full.name}</SectionTitle>
-              {isActive ? <Badge label="ACTUELLE" color={colors.success} /> : null}
+      <View style={styles.cardHeader}>
+        <Pressable
+          onPress={() => setExpanded((v) => !v)}
+          style={styles.cardHeaderMain}
+        >
+          <Text style={styles.chevronToggle}>{expanded ? '▼' : '▶'}</Text>
+          {renaming ? (
+            <Input style={{ flex: 1 }} value={nameDraft} onChangeText={setNameDraft} autoFocus onSubmitEditing={handleRenameProgram} />
+          ) : (
+            <View style={{ flex: 1 }}>
+              <View style={styles.titleRow}>
+                <SectionTitle style={{ marginBottom: 0 }} icon="🏋️">{full.name}</SectionTitle>
+                {isActive ? <Badge label="ACTUELLE" color={colors.success} /> : null}
+              </View>
+              <Text style={styles.collapsedMeta}>
+                {detailLoading && !detailsReady
+                  ? 'Chargement des séances…'
+                  : `${sortedSessions.length} séance${sortedSessions.length > 1 ? 's' : ''}${totalExercises > 0 ? ` · ${totalExercises} exercices` : ''}${!expanded ? ' · appuyer pour déplier' : ''}`}
+              </Text>
             </View>
-            <Text style={styles.collapsedMeta}>
-              {sortedSessions.length} séance{sortedSessions.length > 1 ? 's' : ''}
-              {totalExercises > 0 ? ` · ${totalExercises} exercices` : ''}
-              {!expanded ? ' · appuyer pour déplier' : ''}
-            </Text>
-          </View>
-        )}
+          )}
+        </Pressable>
         {!renaming && (
           <View style={styles.headerActions}>
             <Button title="Récap" variant="accent" onPress={() => setRecapOpen(true)} style={styles.smallBtn} />
             {isCoach && (
               <>
-                <Button title="Dupl." variant="secondary" onPress={handleDuplicateProgram} loading={busy} style={styles.smallBtn} />
+                <Button title="Dupl." variant="secondary" onPress={() => setDupOpen(true)} style={styles.smallBtn} />
                 <Button title="Suppr." variant="danger" onPress={onDeleteProgram} style={styles.smallBtn} />
               </>
             )}
           </View>
         )}
         {renaming && <Button title="OK" onPress={handleRenameProgram} loading={busy} style={styles.smallBtn} />}
-      </Pressable>
+      </View>
 
       {(!readOnly || isCoach) && !isActive ? (
         <Button
@@ -297,7 +321,23 @@ function ProgramCard({
         </Pressable>
       ) : null}
 
-      {!expanded ? null : (
+      <RecapModal visible={recapOpen} onClose={() => setRecapOpen(false)} programName={full.name} sessions={sortedSessions} />
+      <DuplicateProgramModal
+        visible={dupOpen}
+        sourceName={full.name}
+        sourceAthleteId={full.athlete_id || athleteId}
+        programId={program.id}
+        onClose={() => setDupOpen(false)}
+        onDone={(targetAthleteId) => {
+          setDupOpen(false);
+          if (targetAthleteId === athleteId) onChanged();
+          else Alert.alert('Programme dupliqué', 'La copie a été créée pour l’athlète choisi.');
+        }}
+      />
+
+      {!expanded ? null : detailLoading && !detailsReady ? (
+        <InlineLoading label="Chargement des exercices…" />
+      ) : expanded ? (
         <>
           {(full.sessions ?? []).length > 0 && (
             <View style={styles.statsRow}>
@@ -306,8 +346,6 @@ function ProgramCard({
               <StatPill value={sortedSessions.length} label="Séances/sem." />
             </View>
           )}
-
-          <RecapModal visible={recapOpen} onClose={() => setRecapOpen(false)} programName={full.name} sessions={sortedSessions} />
 
           {(full.sessions ?? []).length === 0 ? (
             <Text style={styles.mutedText}>Aucune séance dans ce programme.</Text>
@@ -335,10 +373,9 @@ function ProgramCard({
                       <Text style={styles.sessionName}>{session.session_name}</Text>
                     )}
                     <View style={styles.chipRow}>
-                      {session.exercises.slice(0, 4).map((ex) => (
+                      {session.exercises.map((ex) => (
                         <Badge key={ex.id} label={ex.name} color={muscleColors[ex.muscle ?? ''] ?? colors.primary} />
                       ))}
-                      {session.exercises.length > 4 ? <Badge label={`+${session.exercises.length - 4}`} color={colors.textMuted} /> : null}
                       {session.exercises.length === 0 ? <Text style={styles.emptySession}>Aucun exercice — appuyer pour ajouter</Text> : null}
                     </View>
                   </Pressable>
@@ -393,10 +430,6 @@ function ProgramCard({
             )
           )}
         </>
-      )}
-
-      {!expanded ? (
-        <RecapModal visible={recapOpen} onClose={() => setRecapOpen(false)} programName={full.name} sessions={sortedSessions} />
       ) : null}
     </Card>
   );
@@ -408,6 +441,120 @@ function StatPill({ value, label }: { value: number; label: string }) {
       <Text style={styles.statPillValue}>{value}</Text>
       <Text style={styles.statPillLabel}>{label}</Text>
     </View>
+  );
+}
+
+function DuplicateProgramModal({
+  visible, onClose, onDone, programId, sourceName, sourceAthleteId,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onDone: (athleteId: number) => void;
+  programId: number;
+  sourceName: string;
+  sourceAthleteId: number;
+}) {
+  const [name, setName] = useState(`${sourceName} (copie)`);
+  const [athletes, setAthletes] = useState<UserDTO[]>([]);
+  const [athleteId, setAthleteId] = useState(sourceAthleteId);
+  const [loadingAthletes, setLoadingAthletes] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!visible) return;
+    setName(`${sourceName} (copie)`);
+    setAthleteId(sourceAthleteId);
+    setError(null);
+    setLoadingAthletes(true);
+    listAthletes()
+      .then((list) => {
+        setAthletes(list);
+        if (!list.some((a) => a.id === sourceAthleteId) && list[0]) {
+          setAthleteId(list[0].id);
+        }
+      })
+      .catch((err) => setError(apiErrorMessage(err)))
+      .finally(() => setLoadingAthletes(false));
+  }, [visible, sourceName, sourceAthleteId]);
+
+  const handleConfirm = async () => {
+    if (!name.trim()) {
+      setError('Donne un nom au nouveau programme.');
+      return;
+    }
+    if (!athleteId) {
+      setError('Choisis un athlète.');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await duplicateProgram(programId, { name: name.trim(), athlete_id: athleteId });
+      onDone(athleteId);
+    } catch (err) {
+      setError(apiErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalCard}>
+          <Text style={styles.modalTitle}>Dupliquer le programme</Text>
+          <Text style={styles.dupHint}>Choisis le nom et l’athlète de destination.</Text>
+
+          <Text style={styles.fieldLabel}>Nom du nouveau programme</Text>
+          <Input
+            value={name}
+            onChangeText={setName}
+            placeholder="Ex: Programme (copie)"
+            autoFocus
+          />
+
+          <Text style={[styles.fieldLabel, { marginTop: spacing.md }]}>Athlète</Text>
+          {loadingAthletes ? (
+            <InlineLoading label="Chargement des athlètes…" />
+          ) : (
+            <ScrollView style={styles.athleteList} nestedScrollEnabled>
+              {athletes.map((a) => {
+                const selected = a.id === athleteId;
+                return (
+                  <Pressable
+                    key={a.id}
+                    onPress={() => setAthleteId(a.id)}
+                    style={[styles.athleteRow, selected && styles.athleteRowOn]}
+                  >
+                    <Text style={[styles.athleteName, selected && styles.athleteNameOn]}>
+                      {a.display_name || a.username}
+                    </Text>
+                    <Text style={styles.athleteCheck}>{selected ? '✓' : ''}</Text>
+                  </Pressable>
+                );
+              })}
+              {athletes.length === 0 ? (
+                <Text style={styles.mutedText}>Aucun athlète trouvé.</Text>
+              ) : null}
+            </ScrollView>
+          )}
+
+          {error ? <Text style={styles.dupError}>{error}</Text> : null}
+
+          <View style={styles.dupActions}>
+            <Button title="Annuler" variant="ghost" onPress={onClose} style={{ flex: 1 }} />
+            <Button
+              title="Dupliquer"
+              onPress={handleConfirm}
+              loading={saving}
+              disabled={!name.trim() || !athleteId || saving}
+              style={{ flex: 1 }}
+            />
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -457,11 +604,12 @@ const styles = StyleSheet.create({
   createBtn: { paddingHorizontal: spacing.lg },
   activeCard: { borderColor: colors.success, borderWidth: 1.5 },
   cardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.xs, gap: spacing.xs },
+  cardHeaderMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   chevronToggle: { color: colors.textMuted, fontSize: 12, fontWeight: '900', width: 16 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },
   collapsedMeta: { color: colors.textFaint, fontSize: fontSize.xs, fontWeight: '600', marginTop: 2 },
   renameHint: { color: colors.textMuted, fontSize: fontSize.xs, fontWeight: '700' },
-  headerActions: { flexDirection: 'row', gap: spacing.xs },
+  headerActions: { flexDirection: 'row', gap: spacing.xs, flexShrink: 0 },
   smallBtn: { paddingVertical: spacing.xs, paddingHorizontal: spacing.sm },
   sessionActions: { flexDirection: 'row', gap: spacing.sm, paddingLeft: spacing.xs },
   sessionActionIcon: { fontSize: 16, padding: spacing.xs },
@@ -506,4 +654,18 @@ const styles = StyleSheet.create({
   modalEmptyDay: { color: colors.textFaint, fontSize: fontSize.xs, fontStyle: 'italic' },
   modalExerciseLine: { color: colors.textMuted, fontSize: fontSize.sm, marginBottom: 2 },
   modalMuscle: { color: colors.textFaint, fontSize: fontSize.xs },
+  dupHint: { color: colors.textMuted, fontSize: fontSize.sm, marginBottom: spacing.md, marginTop: -spacing.sm },
+  fieldLabel: { color: colors.textFaint, fontSize: 11, fontWeight: '800', textTransform: 'uppercase', marginBottom: 6 },
+  athleteList: { maxHeight: 220, marginBottom: spacing.sm },
+  athleteRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.border, marginBottom: spacing.xs, backgroundColor: colors.surfaceAlt,
+  },
+  athleteRowOn: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  athleteName: { color: colors.textMuted, fontWeight: '700', fontSize: fontSize.sm, flex: 1 },
+  athleteNameOn: { color: colors.text },
+  athleteCheck: { color: colors.primary, fontWeight: '900', fontSize: 16, width: 20, textAlign: 'right' },
+  dupError: { color: colors.danger, fontWeight: '700', marginBottom: spacing.sm },
+  dupActions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
 });

@@ -3,6 +3,7 @@ import { deleteItemAsync, getItemAsync, setItemAsync } from '../utils/secureStor
 import { loginRequest, meRequest } from '../api/auth';
 import { apiErrorMessage, TOKEN_KEY } from '../api/client';
 import { UserDTO } from '../api/types';
+import { ensurePerfQueueFlushOnForeground, prefetchAthleteData } from '../utils/prefetch';
 
 interface AuthContextValue {
   user: UserDTO | null;
@@ -23,12 +24,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    ensurePerfQueueFlushOnForeground();
+  }, []);
+
+  useEffect(() => {
     (async () => {
       try {
         const token = await getItemAsync(TOKEN_KEY);
         if (token) {
           const me = await meRequest();
           setUser(me);
+          void prefetchAthleteData(me);
         }
       } catch {
         try {
@@ -49,6 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { token, user: loggedInUser } = await loginRequest(username, password);
       await setItemAsync(TOKEN_KEY, token);
       setUser(loggedInUser);
+      void prefetchAthleteData(loggedInUser);
     } catch (err) {
       setError(apiErrorMessage(err, 'Connexion impossible'));
       throw err;

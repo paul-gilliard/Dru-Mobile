@@ -6,6 +6,7 @@ import { colors } from '../theme';
 import { useAuth } from '../context/AuthContext';
 import { AthleteScopeProvider } from '../context/AthleteScopeContext';
 import { AthleteStackParamList } from './types';
+import { useTabBarStyle } from './useTabBarStyle';
 import HomeScreen from '../screens/athlete/HomeScreen';
 import ProgramScreen from '../screens/athlete/ProgramScreen';
 import SessionDetailScreen from '../screens/athlete/SessionDetailScreen';
@@ -73,6 +74,7 @@ function TabIcon({ emoji }: { emoji: string }) {
 
 export default function AthleteNavigator() {
   const { user } = useAuth();
+  const tabBarStyle = useTabBarStyle();
 
   return (
     <AthleteScopeProvider athleteId={user?.id ?? 0} athleteName={user?.display_name ?? ''} readOnly={false}>
@@ -81,7 +83,7 @@ export default function AthleteNavigator() {
           headerShown: false,
           tabBarActiveTintColor: colors.primary,
           tabBarInactiveTintColor: colors.textFaint,
-          tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border, height: 66, paddingTop: 6, paddingBottom: 10 },
+          tabBarStyle,
           tabBarLabelStyle: { fontWeight: '700', fontSize: 11 },
         }}
       >
