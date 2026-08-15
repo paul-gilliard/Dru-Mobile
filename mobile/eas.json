@@ -24,12 +24,30 @@
       }
     },
     "production": {
-      "distribution": "internal",
+      "distribution": "store",
+      "autoIncrement": false,
       "android": {
-        "buildType": "apk"
+        "buildType": "app-bundle"
+      },
+      "ios": {
+        "resourceClass": "m-medium"
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://web-production-9fd5b.up.railway.app/api"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "android": {
+        "track": "internal",
+        "releaseStatus": "draft",
+        "changesNotSentForReview": true
+      },
+      "ios": {
+        "appleId": "paul.gilliard.8@gmail.com",
+        "language": "fr-FR",
+        "ascAppId": "REPLACE_AFTER_APP_STORE_CONNECT"
       }
     }
   }

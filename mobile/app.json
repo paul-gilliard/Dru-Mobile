@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Dru Mobile",
+    "name": "Dru",
     "slug": "dru-mobile",
     "scheme": "drumobile",
     "version": "1.0.4",
@@ -8,8 +8,28 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0D0F12",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0D0F12"
+    },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.drumobile.app",
+      "buildNumber": "5",
+      "usesAppleSignIn": false,
+      "infoPlist": {
+        "CFBundleDisplayName": "Dru",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "privacyManifests": {
+        "NSPrivacyAccessedAPITypes": [
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
+            "NSPrivacyAccessedAPITypeReasons": ["CA92.1"]
+          }
+        ]
+      }
     },
     "android": {
       "package": "com.drumobile.app",
@@ -22,10 +42,17 @@
       },
       "predictiveBackGestureEnabled": false,
       "permissions": [
+        "android.permission.INTERNET",
         "android.permission.health.READ_STEPS",
         "android.permission.health.READ_SLEEP",
         "android.permission.health.READ_NUTRITION",
         "android.permission.health.READ_HEALTH_DATA_HISTORY"
+      ],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION"
       ]
     },
     "web": {
@@ -42,6 +69,9 @@
         {
           "android": {
             "minSdkVersion": 26
+          },
+          "ios": {
+            "deploymentTarget": "15.1"
           }
         }
       ]
@@ -49,7 +79,9 @@
     "extra": {
       "eas": {
         "projectId": "1136fefd-99b9-41b8-9ce0-d3a126b6052e"
-      }
+      },
+      "privacyPolicyUrl": "https://web-production-9fd5b.up.railway.app/privacy",
+      "supportEmail": "paul.gilliard.8@gmail.com"
     },
     "owner": "paul_luap"
   }
