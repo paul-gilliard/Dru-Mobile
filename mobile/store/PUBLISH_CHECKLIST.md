@@ -26,6 +26,7 @@ Compte Expo (`paul_luap`) : déjà OK.
    - Langue : Français
    - Type : Application
    - Gratuit
+   - Nom développeur public déjà amorcé : **Dru App** (si tu continues l’inscription ouverte)
 5. Remplis (bloquants avant mise en ligne) :
    - Fiche Store → textes dans `mobile/store/LISTING_FR.md`
    - Politique de confidentialité : `https://web-production-9fd5b.up.railway.app/privacy`
