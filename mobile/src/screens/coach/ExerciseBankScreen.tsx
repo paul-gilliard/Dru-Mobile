@@ -6,6 +6,7 @@ import { apiErrorMessage } from '../../api/client';
 import { ExerciseBankDTO } from '../../api/types';
 import { Badge, Button, Card, EmptyState, ErrorView, Input, LoadingView, SectionTitle } from '../../components/ui';
 import { colors, fontSize, muscleColors, spacing } from '../../theme';
+import { TAB_BAR_CLEARANCE } from '../../navigation/useTabBarStyle';
 
 export default function ExerciseBankScreen() {
   const [exercises, setExercises] = useState<ExerciseBankDTO[]>([]);
@@ -75,7 +76,7 @@ export default function ExerciseBankScreen() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
     >
       <Card style={{ marginBottom: spacing.lg }}>
-        <SectionTitle icon="🏋️">Nouvel exercice</SectionTitle>
+        <SectionTitle icon="exercise">Nouvel exercice</SectionTitle>
         <Input placeholder="Nom de l'exercice" value={name} onChangeText={setName} />
         <View style={styles.muscleRow}>
           {muscleGroups.map((mg) => (
@@ -88,7 +89,7 @@ export default function ExerciseBankScreen() {
       </Card>
 
       {exercises.length === 0 ? (
-        <EmptyState icon="🏋️" title="Aucun exercice dans la banque" />
+        <EmptyState icon="exercise" title="Aucun exercice dans la banque" />
       ) : (
         Array.from(byMuscle.entries()).map(([mg, list]) => (
           <View key={mg} style={{ marginBottom: spacing.lg }}>
@@ -108,8 +109,8 @@ export default function ExerciseBankScreen() {
               ) : (
                 <Card key={ex.id} style={styles.exerciseRow}>
                   <Text style={styles.exerciseName}>{ex.name}</Text>
-                  <Button title="✎" variant="ghost" onPress={() => setEditingId(ex.id)} style={styles.deleteBtn} />
-                  <Button title="✕" variant="ghost" onPress={() => handleDelete(ex.id)} style={styles.deleteBtn} />
+                  <Button title="" icon="edit" variant="ghost" onPress={() => setEditingId(ex.id)} style={styles.deleteBtn} />
+                  <Button title="" icon="trash" variant="ghost" onPress={() => handleDelete(ex.id)} style={styles.deleteBtn} />
                 </Card>
               )
             ))}
@@ -158,7 +159,7 @@ function EditExerciseBankRow({
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.lg, paddingBottom: spacing.xxl },
+  content: { padding: spacing.lg, paddingBottom: spacing.xxl + TAB_BAR_CLEARANCE },
   muscleRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.md },
   muscleTitleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.sm },
   muscleDot: { width: 8, height: 8, borderRadius: 4 },

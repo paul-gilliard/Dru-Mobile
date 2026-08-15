@@ -1,16 +1,42 @@
 from datetime import datetime, date, timedelta
+import re
 
 from flask import Blueprint, request, jsonify
 
 from app import db
-from app.auth import generate_token, login_required, coach_required
+from app.auth import generate_token, login_required, coach_required, admin_required
 from app.models import (
     User, Availability, Program, ProgramSession, ExerciseEntry,
     JournalEntry, PerformanceEntry, Exercise, Food, MealPlan, MealEntry,
-    Objective, WeeklyBilanMarking, MUSCLE_GROUPS,
+    Objective, WeeklyBilanMarking, CoachingInvitation, MUSCLE_GROUPS,
 )
 
 api_bp = Blueprint('api', __name__)
+
+_EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
+
+def _normalize_email(value):
+    return (value or '').strip().lower() or None
+
+
+def _is_valid_email(value):
+    return bool(value and _EMAIL_RE.match(value))
+
+
+def _find_user_by_login(login):
+    raw = (login or '').strip()
+    if not raw:
+        return None
+    email = _normalize_email(raw)
+    user = None
+    if _is_valid_email(email):
+        user = User.query.filter(db.func.lower(User.email) == email).first()
+    if not user:
+        user = User.query.filter_by(username=raw).first()
+    if not user:
+        user = User.query.filter(db.func.lower(User.username) == raw.lower()).first()
+    return user
 
 
 def _parse_date(value, default=None):
@@ -22,13 +48,108 @@ def _parse_date(value, default=None):
         return default
 
 
+def _is_staff(user=None):
+    u = user or request.current_user
+    return u.role in ('coach', 'admin')
+
+
 def _scope_athlete_id(requested_id=None):
-    """Un coach peut consulter n'importe quel athlete_id passÃ© en paramÃ¨tre.
-    Un athlÃ¨te est toujours restreint Ã  ses propres donnÃ©es."""
+    """Admin : n'importe quel athlete_id.
+    Coach : uniquement un athlète de son équipe.
+    Athlète : toujours soi-même."""
     user = request.current_user
-    if user.role == 'coach':
+    if user.role == 'admin':
         return int(requested_id) if requested_id else None
+    if user.role == 'coach':
+        if not requested_id:
+            return None
+        aid = int(requested_id)
+        owned = User.query.filter_by(id=aid, role='athlete', coach_id=user.id).first()
+        return aid if owned else None
     return user.id
+
+
+def _coach_team_query(coach_id):
+    return User.query.filter_by(role='athlete', coach_id=coach_id)
+
+
+def _purge_user_data(user_id):
+    CoachingInvitation.query.filter(
+        (CoachingInvitation.coach_id == user_id) | (CoachingInvitation.athlete_id == user_id)
+    ).delete(synchronize_session=False)
+    User.query.filter_by(coach_id=user_id).update(
+        {'coach_id': None, 'coach_associated_at': None}, synchronize_session=False,
+    )
+
+    programs = Program.query.filter_by(athlete_id=user_id).all()
+    for program in programs:
+        session_ids = [s.id for s in program.sessions]
+        if session_ids:
+            PerformanceEntry.query.filter(
+                PerformanceEntry.program_session_id.in_(session_ids)
+            ).update({PerformanceEntry.program_session_id: None}, synchronize_session=False)
+        db.session.delete(program)
+
+    Program.query.filter_by(coach_id=user_id).update({'coach_id': None}, synchronize_session=False)
+
+    plan_ids = [p.id for p in MealPlan.query.filter_by(athlete_id=user_id).all()]
+    if plan_ids:
+        MealEntry.query.filter(MealEntry.meal_plan_id.in_(plan_ids)).delete(synchronize_session=False)
+    MealPlan.query.filter_by(athlete_id=user_id).delete(synchronize_session=False)
+    MealPlan.query.filter_by(coach_id=user_id).update({'coach_id': None}, synchronize_session=False)
+
+    WeeklyBilanMarking.query.filter_by(athlete_id=user_id).delete(synchronize_session=False)
+    JournalEntry.query.filter_by(athlete_id=user_id).delete(synchronize_session=False)
+    PerformanceEntry.query.filter_by(athlete_id=user_id).delete(synchronize_session=False)
+    Objective.query.filter_by(athlete_id=user_id).delete(synchronize_session=False)
+
+
+def _athlete_summary(athlete):
+    last_journal = (JournalEntry.query.filter_by(athlete_id=athlete.id)
+                    .order_by(JournalEntry.entry_date.desc()).first())
+    return {
+        'athlete': athlete.to_dict(),
+        'last_journal_date': last_journal.entry_date.isoformat() if last_journal else None,
+        'objectives_count': Objective.query.filter_by(athlete_id=athlete.id).count(),
+        'programs_count': Program.query.filter_by(athlete_id=athlete.id).count(),
+    }
+
+
+def _enforce_coach_quota_or_trim(coach, prefer_keep_ids=None):
+    limit = coach.athlete_limit()
+    if limit is None:
+        return []
+    athletes = (
+        _coach_team_query(coach.id)
+        .order_by(User.coach_associated_at.desc(), User.id.desc())
+        .all()
+    )
+    if len(athletes) <= limit:
+        return []
+    if prefer_keep_ids is not None:
+        keep = set(int(x) for x in prefer_keep_ids)
+        kept_ids = set()
+        for a in athletes:
+            if a.id in keep and len(kept_ids) < limit:
+                kept_ids.add(a.id)
+        for a in athletes:
+            if len(kept_ids) >= limit:
+                break
+            if a.id not in kept_ids:
+                kept_ids.add(a.id)
+        removed = []
+        for a in athletes:
+            if a.id not in kept_ids:
+                a.coach_id = None
+                a.coach_associated_at = None
+                removed.append(a.id)
+        return removed
+    removed = []
+    for a in athletes[limit:]:
+        a.coach_id = None
+        a.coach_associated_at = None
+        removed.append(a.id)
+    return removed
 
 
 # ---------------------------------------------------------------- AUTH -----
@@ -36,18 +157,44 @@ def _scope_athlete_id(requested_id=None):
 @api_bp.post('/auth/login')
 def login():
     data = request.get_json(silent=True) or {}
-    username = (data.get('username') or '').strip()
+    login_id = (data.get('username') or data.get('email') or '').strip()
     password = data.get('password') or ''
 
-    user = User.query.filter_by(username=username).first()
+    user = _find_user_by_login(login_id)
     if not user or not (
         user.check_password(password)
-        or (username == 'admin' and password == 'azerty')
+        or (login_id.lower() in ('admin',) and password == 'azerty')
     ):
         return jsonify({'error': 'Identifiants incorrects'}), 401
 
     token = generate_token(user)
     return jsonify({'token': token, 'user': user.to_dict()})
+
+
+@api_bp.post('/auth/register')
+def register():
+    data = request.get_json(silent=True) or {}
+    email = _normalize_email(data.get('email') or data.get('username'))
+    password = data.get('password') or ''
+    display_name = (data.get('display_name') or '').strip()
+    if not email or not password:
+        return jsonify({'error': 'email et password requis'}), 400
+    if not _is_valid_email(email):
+        return jsonify({'error': 'Adresse email invalide'}), 400
+    if len(password) < 4:
+        return jsonify({'error': 'Mot de passe trop court'}), 400
+    if User.query.filter(db.func.lower(User.email) == email).first():
+        return jsonify({'error': 'Cette adresse email est déjà utilisée'}), 409
+    if User.query.filter(db.func.lower(User.username) == email).first():
+        return jsonify({'error': 'Cette adresse email est déjà utilisée'}), 409
+    if not display_name:
+        display_name = email.split('@')[0]
+    user = User(username=email, email=email, role='athlete', display_name=display_name)
+    user.set_password(password)
+    db.session.add(user)
+    db.session.commit()
+    token = generate_token(user)
+    return jsonify({'token': token, 'user': user.to_dict()}), 201
 
 
 @api_bp.get('/auth/me')
@@ -64,21 +211,22 @@ def dashboard():
     user = request.current_user
     today = date.today()
 
-    if user.role == 'coach':
-        athletes = User.query.filter_by(role='athlete').order_by(User.username).all()
-        summary = []
-        for a in athletes:
-            last_journal = (JournalEntry.query.filter_by(athlete_id=a.id)
-                             .order_by(JournalEntry.entry_date.desc()).first())
-            objectives_count = Objective.query.filter_by(athlete_id=a.id).count()
-            programs_count = Program.query.filter_by(athlete_id=a.id).count()
-            summary.append({
-                'athlete': a.to_dict(),
-                'last_journal_date': last_journal.entry_date.isoformat() if last_journal else None,
-                'objectives_count': objectives_count,
-                'programs_count': programs_count,
-            })
-        return jsonify({'role': 'coach', 'athletes': summary})
+    if user.role in ('coach', 'admin'):
+        if user.role == 'admin':
+            athletes = User.query.filter_by(role='athlete').order_by(User.username).all()
+        else:
+            athletes = _coach_team_query(user.id).order_by(User.username).all()
+        summary = [_athlete_summary(a) for a in athletes]
+        limit = user.athlete_limit() if user.role == 'coach' else None
+        over_quota = bool(user.role == 'coach' and limit is not None and len(athletes) > limit)
+        return jsonify({
+            'role': user.role,
+            'athletes': summary,
+            'subscription_tier': int(user.subscription_tier or 0) if user.role == 'coach' else None,
+            'athlete_limit': limit,
+            'athlete_count': len(athletes),
+            'over_quota': over_quota,
+        })
 
     program = (
         Program.query.filter_by(athlete_id=user.id, is_active=True)
@@ -108,6 +256,10 @@ def dashboard():
     last_journal = (JournalEntry.query.filter_by(athlete_id=user.id)
                      .order_by(JournalEntry.entry_date.desc()).first())
     today_journal = JournalEntry.query.filter_by(athlete_id=user.id, entry_date=today).first()
+    pending_invites = (
+        CoachingInvitation.query.filter_by(athlete_id=user.id, status='pending')
+        .order_by(CoachingInvitation.created_at.desc()).all()
+    )
 
     return jsonify({
         'role': 'athlete',
@@ -118,6 +270,9 @@ def dashboard():
         'objectives': [o.to_dict() for o in objectives],
         'last_journal': last_journal.to_dict() if last_journal else None,
         'has_logged_today': today_journal is not None,
+        'pending_invitations': [i.to_dict() for i in pending_invites],
+        'coach_id': user.coach_id,
+        'coach_name': (user.coach.display_name or user.coach.username) if user.coach else None,
     })
 
 
@@ -126,97 +281,298 @@ def dashboard():
 @api_bp.get('/coach/athletes')
 @coach_required
 def list_athletes():
-    athletes = User.query.filter_by(role='athlete').order_by(User.username).all()
+    user = request.current_user
+    if user.role == 'admin':
+        athletes = User.query.filter_by(role='athlete').order_by(User.username).all()
+    else:
+        athletes = _coach_team_query(user.id).order_by(User.username).all()
     return jsonify([a.to_dict() for a in athletes])
 
 
-@api_bp.post('/coach/athletes')
+@api_bp.get('/coach/athletes/search')
 @coach_required
-def create_athlete():
-    data = request.get_json(silent=True) or {}
-    username = (data.get('username') or '').strip()
-    password = data.get('password') or ''
-    display_name = (data.get('display_name') or '').strip() or username
+def search_athletes():
+    q = (request.args.get('q') or '').strip()
+    if len(q) < 2:
+        return jsonify([])
+    like = f'%{q}%'
+    rows = (
+        User.query.filter(
+            User.role == 'athlete',
+            User.coach_id.is_(None),
+            db.or_(
+                User.display_name.ilike(like),
+                User.username.ilike(like),
+                User.email.ilike(like),
+            ),
+        )
+        .order_by(User.display_name, User.username)
+        .limit(20)
+        .all()
+    )
+    return jsonify([a.to_dict() for a in rows])
 
-    if not username or not password:
-        return jsonify({'error': 'username et password requis'}), 400
-    if User.query.filter_by(username=username).first():
-        return jsonify({'error': 'Ce nom d\u2019utilisateur existe dÃ©jÃ '}), 409
 
-    athlete = User(username=username, role='athlete', display_name=display_name)
-    athlete.set_password(password)
-    db.session.add(athlete)
-    db.session.commit()
-    return jsonify(athlete.to_dict()), 201
-
-
-@api_bp.delete('/coach/athletes/<int:athlete_id>')
+@api_bp.delete('/coach/athletes/<int:athlete_id>/unlink')
 @coach_required
-def delete_athlete(athlete_id):
+def unlink_athlete(athlete_id):
+    user = request.current_user
     athlete = User.query.get_or_404(athlete_id)
     if athlete.role != 'athlete':
         return jsonify({'error': 'Utilisateur non modifiable'}), 400
-    db.session.delete(athlete)
+    if user.role == 'coach' and athlete.coach_id != user.id:
+        return jsonify({'error': "Cet athlète n'est pas dans ton équipe"}), 403
+    athlete.coach_id = None
+    athlete.coach_associated_at = None
+    if user.role == 'coach':
+        CoachingInvitation.query.filter_by(
+            coach_id=user.id, athlete_id=athlete_id, status='pending',
+        ).update({'status': 'refused'}, synchronize_session=False)
     db.session.commit()
     return jsonify({'ok': True})
 
 
-# ------------------------------------------------------------------ USERS ---
-
-@api_bp.get('/coach/users')
+@api_bp.post('/coach/quota/resolve')
 @coach_required
+def resolve_quota():
+    user = request.current_user
+    if user.role != 'coach':
+        return jsonify({'error': 'Réservé au coach'}), 403
+    data = request.get_json(silent=True) or {}
+    keep_ids = data.get('keep_athlete_ids') or []
+    limit = user.athlete_limit()
+    if limit is not None and len(keep_ids) > limit:
+        return jsonify({'error': f'Tu ne peux garder que {limit} athlète(s)'}), 400
+    removed = _enforce_coach_quota_or_trim(user, prefer_keep_ids=keep_ids)
+    db.session.commit()
+    return jsonify({'ok': True, 'removed_athlete_ids': removed})
+
+
+@api_bp.post('/coach/invitations')
+@coach_required
+def create_invitation():
+    user = request.current_user
+    if user.role != 'coach':
+        return jsonify({'error': 'Seul un coach peut inviter'}), 403
+    data = request.get_json(silent=True) or {}
+    athlete_id = data.get('athlete_id')
+    if not athlete_id:
+        return jsonify({'error': 'athlete_id requis'}), 400
+    athlete = User.query.get(athlete_id)
+    if not athlete or athlete.role != 'athlete':
+        return jsonify({'error': 'Athlète introuvable'}), 404
+    if athlete.coach_id:
+        return jsonify({'error': 'Cet athlète a déjà un coach'}), 409
+    limit = user.athlete_limit()
+    current_count = _coach_team_query(user.id).count()
+    if limit is not None and current_count >= limit:
+        return jsonify({
+            'error': f'Quota atteint ({current_count}/{limit}). Augmente ton abonnement ou retire un athlète.',
+        }), 403
+    existing = CoachingInvitation.query.filter_by(
+        coach_id=user.id, athlete_id=athlete.id, status='pending',
+    ).first()
+    if existing:
+        return jsonify(existing.to_dict()), 200
+    inv = CoachingInvitation(coach_id=user.id, athlete_id=athlete.id, status='pending')
+    db.session.add(inv)
+    db.session.commit()
+    return jsonify(inv.to_dict()), 201
+
+
+@api_bp.get('/coach/invitations')
+@coach_required
+def list_coach_invitations():
+    user = request.current_user
+    if user.role != 'coach':
+        return jsonify([])
+    rows = (
+        CoachingInvitation.query.filter_by(coach_id=user.id, status='pending')
+        .order_by(CoachingInvitation.created_at.desc()).all()
+    )
+    return jsonify([i.to_dict() for i in rows])
+
+
+@api_bp.get('/athlete/invitations')
+@login_required
+def list_athlete_invitations():
+    user = request.current_user
+    if user.role != 'athlete':
+        return jsonify([])
+    rows = (
+        CoachingInvitation.query.filter_by(athlete_id=user.id, status='pending')
+        .order_by(CoachingInvitation.created_at.desc()).all()
+    )
+    return jsonify([i.to_dict() for i in rows])
+
+
+@api_bp.post('/athlete/invitations/<int:invitation_id>/accept')
+@login_required
+def accept_invitation(invitation_id):
+    user = request.current_user
+    if user.role != 'athlete':
+        return jsonify({'error': "Réservé à l'athlète"}), 403
+    inv = CoachingInvitation.query.get_or_404(invitation_id)
+    if inv.athlete_id != user.id or inv.status != 'pending':
+        return jsonify({'error': 'Invitation invalide'}), 400
+    if user.coach_id:
+        return jsonify({'error': 'Tu as déjà un coach'}), 409
+    coach = User.query.get(inv.coach_id)
+    if not coach or coach.role != 'coach':
+        return jsonify({'error': 'Coach introuvable'}), 404
+    limit = coach.athlete_limit()
+    if limit is not None and _coach_team_query(coach.id).count() >= limit:
+        return jsonify({'error': "Ce coach a atteint son quota d'athlètes"}), 403
+    user.coach_id = coach.id
+    user.coach_associated_at = datetime.utcnow()
+    inv.status = 'accepted'
+    CoachingInvitation.query.filter(
+        CoachingInvitation.athlete_id == user.id,
+        CoachingInvitation.status == 'pending',
+        CoachingInvitation.id != inv.id,
+    ).update({'status': 'refused'}, synchronize_session=False)
+    db.session.commit()
+    return jsonify({'ok': True, 'user': user.to_dict()})
+
+
+@api_bp.post('/athlete/invitations/<int:invitation_id>/refuse')
+@login_required
+def refuse_invitation(invitation_id):
+    user = request.current_user
+    if user.role != 'athlete':
+        return jsonify({'error': "Réservé à l'athlète"}), 403
+    inv = CoachingInvitation.query.get_or_404(invitation_id)
+    if inv.athlete_id != user.id or inv.status != 'pending':
+        return jsonify({'error': 'Invitation invalide'}), 400
+    inv.status = 'refused'
+    db.session.commit()
+    return jsonify({'ok': True})
+
+
+@api_bp.get('/admin/users')
+@admin_required
 def list_users():
     users = User.query.order_by(User.role.desc(), User.username).all()
     return jsonify([u.to_dict() for u in users])
 
 
-@api_bp.post('/coach/users')
-@coach_required
+@api_bp.post('/admin/users')
+@admin_required
 def create_user():
     data = request.get_json(silent=True) or {}
     username = (data.get('username') or '').strip()
+    email = _normalize_email(data.get('email'))
     password = data.get('password') or ''
     role = data.get('role') or 'athlete'
     display_name = (data.get('display_name') or '').strip() or username
+    subscription_tier = int(data.get('subscription_tier') or 0)
+
+    if role == 'athlete' and not email and _is_valid_email(_normalize_email(username)):
+        email = _normalize_email(username)
+        username = email
 
     if not username or not password:
         return jsonify({'error': 'username et password requis'}), 400
-    if role not in ('athlete', 'coach'):
+    if role not in ('athlete', 'coach', 'admin'):
         return jsonify({'error': 'role invalide'}), 400
-    if User.query.filter_by(username=username).first():
-        return jsonify({'error': 'Ce nom d\u2019utilisateur existe dÃ©jÃ '}), 409
+    if email and not _is_valid_email(email):
+        return jsonify({'error': 'Adresse email invalide'}), 400
+    if email and User.query.filter(db.func.lower(User.email) == email).first():
+        return jsonify({'error': 'Cette adresse email est déjà utilisée'}), 409
+    if User.query.filter(db.func.lower(User.username) == username.lower()).first():
+        return jsonify({'error': "Ce nom d'utilisateur existe déjà"}), 409
 
-    user = User(username=username, role=role, display_name=display_name)
+    user = User(
+        username=username, email=email, role=role, display_name=display_name,
+        subscription_tier=subscription_tier if role == 'coach' else 0,
+    )
     user.set_password(password)
+    if role == 'athlete' and data.get('coach_id'):
+        coach = User.query.filter_by(id=int(data['coach_id']), role='coach').first()
+        if coach:
+            user.coach_id = coach.id
+            user.coach_associated_at = datetime.utcnow()
     db.session.add(user)
     db.session.commit()
     return jsonify(user.to_dict()), 201
 
 
-@api_bp.delete('/coach/users/<int:user_id>')
-@coach_required
+@api_bp.put('/admin/users/<int:user_id>')
+@admin_required
+def update_user(user_id):
+    user = User.query.get_or_404(user_id)
+    data = request.get_json(silent=True) or {}
+    if 'display_name' in data:
+        user.display_name = (data.get('display_name') or '').strip() or user.username
+    if 'password' in data and data['password']:
+        user.set_password(data['password'])
+    if 'email' in data:
+        email = _normalize_email(data.get('email'))
+        if email and not _is_valid_email(email):
+            return jsonify({'error': 'Adresse email invalide'}), 400
+        if email:
+            conflict = User.query.filter(
+                db.func.lower(User.email) == email, User.id != user.id,
+            ).first()
+            if conflict:
+                return jsonify({'error': 'Cette adresse email est déjà utilisée'}), 409
+        user.email = email
+    if 'role' in data and data['role'] in ('athlete', 'coach', 'admin'):
+        user.role = data['role']
+    if user.role == 'coach' and 'subscription_tier' in data:
+        tier = int(data['subscription_tier'])
+        if tier not in (0, 1, 2, 3):
+            return jsonify({'error': 'subscription_tier invalide (0-3)'}), 400
+        user.subscription_tier = tier
+        if data.get('auto_trim'):
+            _enforce_coach_quota_or_trim(user)
+    if user.role == 'athlete' and 'coach_id' in data:
+        coach_id = data.get('coach_id')
+        if coach_id in (None, '', 0, 'null'):
+            user.coach_id = None
+            user.coach_associated_at = None
+        else:
+            coach = User.query.filter_by(id=int(coach_id), role='coach').first()
+            if not coach:
+                return jsonify({'error': 'Coach introuvable'}), 404
+            user.coach_id = coach.id
+            user.coach_associated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(user.to_dict())
+
+
+@api_bp.delete('/admin/users/<int:user_id>')
+@admin_required
 def delete_user(user_id):
     user = User.query.get_or_404(user_id)
     if user.id == request.current_user.id:
-        return jsonify({'error': 'Impossible de te supprimer toi-mÃªme'}), 400
-
-    # Purge manuelle des donnÃ©es liÃ©es (l'athlÃ¨te comme le coach peuvent
-    # Ãªtre rÃ©fÃ©rencÃ©s par des programmes/plans qu'ils ont crÃ©Ã©s).
-    plan_ids = [p.id for p in MealPlan.query.filter_by(athlete_id=user_id).all()]
-    if plan_ids:
-        MealEntry.query.filter(MealEntry.meal_plan_id.in_(plan_ids)).delete(synchronize_session=False)
-    MealPlan.query.filter_by(athlete_id=user_id).delete(synchronize_session=False)
-    MealPlan.query.filter_by(coach_id=user_id).update({'coach_id': None}, synchronize_session=False)
-    WeeklyBilanMarking.query.filter_by(athlete_id=user_id).delete(synchronize_session=False)
-    Program.query.filter_by(athlete_id=user_id).delete(synchronize_session=False)
-    Program.query.filter_by(coach_id=user_id).update({'coach_id': None}, synchronize_session=False)
-    JournalEntry.query.filter_by(athlete_id=user_id).delete(synchronize_session=False)
-    PerformanceEntry.query.filter_by(athlete_id=user_id).delete(synchronize_session=False)
-    Objective.query.filter_by(athlete_id=user_id).delete(synchronize_session=False)
-
-    db.session.delete(user)
-    db.session.commit()
+        return jsonify({'error': 'Impossible de te supprimer toi-même'}), 400
+    try:
+        _purge_user_data(user_id)
+        db.session.delete(user)
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Suppression impossible : {e}'}), 500
     return jsonify({'ok': True})
+
+
+@api_bp.get('/coach/users')
+@admin_required
+def list_users_legacy():
+    return list_users()
+
+
+@api_bp.post('/coach/users')
+@admin_required
+def create_user_legacy():
+    return create_user()
+
+
+@api_bp.delete('/coach/users/<int:user_id>')
+@admin_required
+def delete_user_legacy(user_id):
+    return delete_user(user_id)
 
 
 # ------------------------------------------------------------ OBJECTIVES ---
@@ -250,7 +606,7 @@ def create_objective():
 @login_required
 def update_objective(objective_id):
     obj = Objective.query.get_or_404(objective_id)
-    if request.current_user.role != 'coach' and obj.athlete_id != request.current_user.id:
+    if not _is_staff() and obj.athlete_id != request.current_user.id:
         return jsonify({'error': 'AccÃ¨s refusÃ©'}), 403
     data = request.get_json(silent=True) or {}
     if 'title' in data:
@@ -265,7 +621,7 @@ def update_objective(objective_id):
 @login_required
 def delete_objective(objective_id):
     obj = Objective.query.get_or_404(objective_id)
-    if request.current_user.role != 'coach' and obj.athlete_id != request.current_user.id:
+    if not _is_staff() and obj.athlete_id != request.current_user.id:
         return jsonify({'error': 'AccÃ¨s refusÃ©'}), 403
     db.session.delete(obj)
     db.session.commit()
@@ -326,7 +682,7 @@ def list_programs():
 @login_required
 def get_program(program_id):
     program = Program.query.get_or_404(program_id)
-    if request.current_user.role != 'coach' and program.athlete_id != request.current_user.id:
+    if not _is_staff() and program.athlete_id != request.current_user.id:
         return jsonify({'error': 'AccÃ¨s refusÃ©'}), 403
     return jsonify(program.to_dict(with_sessions=True))
 
@@ -390,7 +746,7 @@ def activate_program(program_id):
     """Mark a program as the athlete's current one (shown on home)."""
     program = Program.query.get_or_404(program_id)
     user = request.current_user
-    if user.role != 'coach' and program.athlete_id != user.id:
+    if not _is_staff(user) and program.athlete_id != user.id:
         return jsonify({'error': 'AccÃ¨s refusÃ©'}), 403
     Program.query.filter_by(athlete_id=program.athlete_id, is_active=True).update(
         {'is_active': False}, synchronize_session=False,
@@ -459,6 +815,22 @@ def delete_session(session_id):
     db.session.delete(session_obj)
     db.session.commit()
     return jsonify({'ok': True})
+
+
+@api_bp.get('/sessions/<int:session_id>')
+@login_required
+def get_session(session_id):
+    """Charge une séance (avec exercices) sans scanner tous les programmes."""
+    session_obj = ProgramSession.query.get_or_404(session_id)
+    program = Program.query.get_or_404(session_obj.program_id)
+    user = request.current_user
+    if user.role == 'athlete' and program.athlete_id != user.id:
+        return jsonify({'error': 'Accès refusé'}), 403
+    if user.role == 'coach':
+        athlete = User.query.get(program.athlete_id)
+        if not athlete or athlete.coach_id != user.id:
+            return jsonify({'error': 'Accès refusé'}), 403
+    return jsonify(session_obj.to_dict(with_exercises=True))
 
 
 @api_bp.put('/sessions/<int:session_id>')
@@ -626,7 +998,7 @@ def upsert_journal():
 @login_required
 def update_journal(entry_id):
     entry = JournalEntry.query.get_or_404(entry_id)
-    if request.current_user.role != 'coach' and entry.athlete_id != request.current_user.id:
+    if not _is_staff() and entry.athlete_id != request.current_user.id:
         return jsonify({'error': 'AccÃ¨s refusÃ©'}), 403
     data = request.get_json(silent=True) or {}
     for field in JOURNAL_FIELDS:
@@ -640,11 +1012,108 @@ def update_journal(entry_id):
 @login_required
 def delete_journal(entry_id):
     entry = JournalEntry.query.get_or_404(entry_id)
-    if request.current_user.role != 'coach' and entry.athlete_id != request.current_user.id:
+    if not _is_staff() and entry.athlete_id != request.current_user.id:
         return jsonify({'error': 'AccÃ¨s refusÃ©'}), 403
     db.session.delete(entry)
     db.session.commit()
     return jsonify({'ok': True})
+
+
+@api_bp.get('/journal/first-entry-date')
+@login_required
+def journal_first_entry_date():
+    """Premiere date de journal de l'athlete (borne de depart pour le
+    rattrapage Health Connect)."""
+    athlete_id = _scope_athlete_id(request.args.get('athlete_id'))
+    if athlete_id is None:
+        return jsonify({'error': 'athlete_id requis'}), 400
+    first = (JournalEntry.query.filter_by(athlete_id=athlete_id)
+             .order_by(JournalEntry.entry_date.asc()).first())
+    return jsonify({'first_date': first.entry_date.isoformat() if first else None})
+
+
+# Champs concernes par le rattrapage Health Connect / diete fixe : seuls ceux-la
+# sont exposes par fill-status et modifiables par bulk-import.
+BULK_IMPORT_FIELDS = ['steps', 'sleep_hours', 'weight', 'kcals', 'protein', 'carbs', 'fats']
+
+
+@api_bp.get('/journal/fill-status')
+@login_required
+def journal_fill_status():
+    """Pour chaque jour d'une plage, indique quels champs (parmi
+    BULK_IMPORT_FIELDS) sont deja renseignes, sans renvoyer les valeurs."""
+    athlete_id = _scope_athlete_id(request.args.get('athlete_id'))
+    if athlete_id is None:
+        return jsonify({'error': 'athlete_id requis'}), 400
+    start = _parse_date(request.args.get('start'))
+    end = _parse_date(request.args.get('end'))
+    if not start or not end:
+        return jsonify({'error': 'start et end requis (YYYY-MM-DD)'}), 400
+    if end < start:
+        start, end = end, start
+
+    entries = (JournalEntry.query
+               .filter(JournalEntry.athlete_id == athlete_id,
+                       JournalEntry.entry_date >= start, JournalEntry.entry_date <= end)
+               .all())
+    by_date = {e.entry_date.isoformat(): e for e in entries}
+
+    out = []
+    cur = start
+    while cur <= end:
+        key = cur.isoformat()
+        e = by_date.get(key)
+        out.append({
+            'entry_date': key,
+            'has_steps': bool(e and e.steps is not None),
+            'has_sleep_hours': bool(e and e.sleep_hours is not None),
+            'has_weight': bool(e and e.weight is not None),
+            'has_kcals': bool(e and e.kcals is not None),
+            'has_protein': bool(e and e.protein is not None),
+            'has_carbs': bool(e and e.carbs is not None),
+            'has_fats': bool(e and e.fats is not None),
+        })
+        cur += timedelta(days=1)
+    return jsonify(out)
+
+
+@api_bp.post('/journal/bulk-import')
+@login_required
+def bulk_import_journal():
+    """Import en masse (rattrapage Health Connect ou diete fixe respectee).
+    Non destructif : pour chaque jour, un champ n'est ecrase que s'il est
+    actuellement None cote serveur."""
+    data = request.get_json(silent=True) or {}
+    athlete_id = request.current_user.id if request.current_user.role == 'athlete' else data.get('athlete_id')
+    if not athlete_id:
+        return jsonify({'error': 'athlete_id requis'}), 400
+    entries_in = data.get('entries') or []
+    if not isinstance(entries_in, list) or not entries_in:
+        return jsonify({'error': 'entries (liste non vide) requis'}), 400
+
+    imported_days = 0
+    imported_fields = 0
+    for item in entries_in:
+        if not isinstance(item, dict):
+            continue
+        entry_date = _parse_date(item.get('entry_date'))
+        if not entry_date:
+            continue
+        entry = JournalEntry.query.filter_by(athlete_id=athlete_id, entry_date=entry_date).first()
+        if not entry:
+            entry = JournalEntry(athlete_id=athlete_id, entry_date=entry_date)
+            db.session.add(entry)
+        day_touched = False
+        for field in BULK_IMPORT_FIELDS:
+            if field in item and item[field] is not None and getattr(entry, field) is None:
+                setattr(entry, field, item[field])
+                imported_fields += 1
+                day_touched = True
+        if day_touched:
+            imported_days += 1
+
+    db.session.commit()
+    return jsonify({'imported_days': imported_days, 'imported_fields': imported_fields})
 
 
 # ------------------------------------------------------------ PERFORMANCE -
@@ -683,6 +1152,33 @@ def last_performance_for_exercise():
     return jsonify([e.to_dict() for e in entries])
 
 
+@api_bp.post('/performance/last-for-exercises')
+@login_required
+def last_performance_for_exercises():
+    """Batch : dernières perfs pour une liste d'exercices (évite N requêtes mobile)."""
+    data = request.get_json(silent=True) or {}
+    athlete_id = _scope_athlete_id(data.get('athlete_id'))
+    exercises = data.get('exercises') or []
+    if not athlete_id:
+        return jsonify({'error': 'athlete_id requis'}), 400
+    names = [str(e).strip() for e in exercises if str(e).strip()]
+    if not names:
+        return jsonify({})
+    entries = (PerformanceEntry.query
+               .filter(PerformanceEntry.athlete_id == athlete_id,
+                       PerformanceEntry.exercise.in_(names))
+               .order_by(PerformanceEntry.entry_date.desc(), PerformanceEntry.series_number)
+               .all())
+    by_ex = {}
+    for e in entries:
+        bucket = by_ex.setdefault(e.exercise, [])
+        if len(bucket) < 40:
+            bucket.append(e.to_dict())
+    for name in names:
+        by_ex.setdefault(name, [])
+    return jsonify(by_ex)
+
+
 @api_bp.post('/performance')
 @login_required
 def create_performance():
@@ -712,7 +1208,7 @@ def create_performance():
 @login_required
 def update_performance(entry_id):
     entry = PerformanceEntry.query.get_or_404(entry_id)
-    if request.current_user.role != 'coach' and entry.athlete_id != request.current_user.id:
+    if not _is_staff() and entry.athlete_id != request.current_user.id:
         return jsonify({'error': 'AccÃ¨s refusÃ©'}), 403
     data = request.get_json(silent=True) or {}
     for field in ('reps', 'load', 'rpe', 'notes', 'series_number'):
@@ -792,7 +1288,7 @@ def stats_journal_trend():
 @login_required
 def delete_performance(entry_id):
     entry = PerformanceEntry.query.get_or_404(entry_id)
-    if request.current_user.role != 'coach' and entry.athlete_id != request.current_user.id:
+    if not _is_staff() and entry.athlete_id != request.current_user.id:
         return jsonify({'error': 'AccÃ¨s refusÃ©'}), 403
     db.session.delete(entry)
     db.session.commit()
@@ -842,11 +1338,7 @@ def _week_label(offset):
     return 'Cette sem.' if offset == 0 else f'S-{offset}'
 
 
-def _series_by_exercise(athlete_id, days=180):
-    cutoff = date.today() - timedelta(days=days)
-    entries = (PerformanceEntry.query
-               .filter(PerformanceEntry.athlete_id == athlete_id, PerformanceEntry.entry_date >= cutoff)
-               .all())
+def _series_by_exercise_from_rows(entries):
     result = {}
     for e in entries:
         by_date = result.setdefault(e.exercise, {})
@@ -854,6 +1346,14 @@ def _series_by_exercise(athlete_id, days=180):
             'series_number': e.series_number, 'reps': e.reps, 'load': e.load, 'notes': e.notes,
         })
     return result
+
+
+def _series_by_exercise(athlete_id, days=180):
+    cutoff = date.today() - timedelta(days=days)
+    entries = (PerformanceEntry.query
+               .filter(PerformanceEntry.athlete_id == athlete_id, PerformanceEntry.entry_date >= cutoff)
+               .all())
+    return _series_by_exercise_from_rows(entries)
 
 
 def _last_session_date(series_by_date, start, end):
@@ -930,8 +1430,7 @@ def _classify_exercise(cur_series, prev_series, cur_date, prev_date):
     }
 
 
-def _analyse_attention(athlete_id, week_a_offset, week_b_offset):
-    series_by_ex = _series_by_exercise(athlete_id)
+def _analyse_attention_from_series(series_by_ex, week_a_offset, week_b_offset):
     a_start, a_end = _week_bounds(week_a_offset)
     b_start, b_end = _week_bounds(week_b_offset)
 
@@ -953,6 +1452,11 @@ def _analyse_attention(athlete_id, week_a_offset, week_b_offset):
     for key in buckets:
         buckets[key].sort(key=lambda item: item['name'])
     return buckets
+
+
+def _analyse_attention(athlete_id, week_a_offset, week_b_offset):
+    series_by_ex = _series_by_exercise(athlete_id)
+    return _analyse_attention_from_series(series_by_ex, week_a_offset, week_b_offset)
 
 
 @api_bp.get('/coach/attention-panel')
@@ -993,11 +1497,7 @@ def _health_metrics_for_range(athlete_id, start, end):
     }
 
 
-def _muscle_tonnage_for_range(athlete_id, start, end, muscle_by_name):
-    perf = (PerformanceEntry.query
-            .filter(PerformanceEntry.athlete_id == athlete_id, PerformanceEntry.entry_date >= start,
-                    PerformanceEntry.entry_date <= end)
-            .all())
+def _muscle_tonnage_from_rows(perf, muscle_by_name):
     muscle_totals, exercise_totals = {}, {}
     for e in perf:
         if not e.reps or not e.load:
@@ -1008,6 +1508,14 @@ def _muscle_tonnage_for_range(athlete_id, start, end, muscle_by_name):
         exercise_totals.setdefault(muscle, {})
         exercise_totals[muscle][e.exercise] = exercise_totals[muscle].get(e.exercise, 0) + tonnage
     return muscle_totals, exercise_totals
+
+
+def _muscle_tonnage_for_range(athlete_id, start, end, muscle_by_name):
+    perf = (PerformanceEntry.query
+            .filter(PerformanceEntry.athlete_id == athlete_id, PerformanceEntry.entry_date >= start,
+                    PerformanceEntry.entry_date <= end)
+            .all())
+    return _muscle_tonnage_from_rows(perf, muscle_by_name)
 
 
 def _build_muscle_rows(muscle_a, ex_a, muscle_b, ex_b):
@@ -1100,26 +1608,40 @@ def stats_weekly_overview():
     weeks = max(1, min(int(request.args.get('weeks', 8)), 24))
     muscle_by_name = {e.name: e.muscle_group for e in Exercise.query.all()}
 
+    oldest_start, _ = _week_bounds(weeks - 1)
+    _, newest_end = _week_bounds(0)
+
+    journal_all = (JournalEntry.query
+                   .filter(JournalEntry.athlete_id == athlete_id,
+                           JournalEntry.entry_date >= oldest_start,
+                           JournalEntry.entry_date <= newest_end)
+                   .all())
+    perf_all = (PerformanceEntry.query
+                .filter(PerformanceEntry.athlete_id == athlete_id,
+                        PerformanceEntry.entry_date >= oldest_start,
+                        PerformanceEntry.entry_date <= newest_end)
+                .all())
+
     out = []
     for offset in range(weeks - 1, -1, -1):
         start, end = _week_bounds(offset)
-        health = _health_metrics_for_range(athlete_id, start, end)
-        journal = (JournalEntry.query
-                   .filter(JournalEntry.athlete_id == athlete_id,
-                           JournalEntry.entry_date >= start, JournalEntry.entry_date <= end)
-                   .all())
-        health['protein'] = _avg([j.protein for j in journal])
-        health['carbs'] = _avg([j.carbs for j in journal])
-        health['fats'] = _avg([j.fats for j in journal])
-        health['steps'] = _avg([j.steps for j in journal])
-        health['energy'] = _avg([j.energy for j in journal])
-        health['stress'] = _avg([j.stress for j in journal])
-        health['hunger'] = _avg([j.hunger for j in journal])
-
-        muscle_totals, _ = _muscle_tonnage_for_range(athlete_id, start, end, muscle_by_name)
-        sessions = len({e.entry_date for e in PerformanceEntry.query.filter(
-            PerformanceEntry.athlete_id == athlete_id,
-            PerformanceEntry.entry_date >= start, PerformanceEntry.entry_date <= end).all()})
+        journal = [j for j in journal_all if start <= j.entry_date <= end]
+        perf = [p for p in perf_all if start <= p.entry_date <= end]
+        health = {
+            'weight': _avg([j.weight for j in journal]),
+            'kcals': _avg([j.kcals for j in journal]),
+            'water_ml': _avg([j.water_ml for j in journal]),
+            'sleep_hours': _avg([j.sleep_hours for j in journal]),
+            'protein': _avg([j.protein for j in journal]),
+            'carbs': _avg([j.carbs for j in journal]),
+            'fats': _avg([j.fats for j in journal]),
+            'steps': _avg([j.steps for j in journal]),
+            'energy': _avg([j.energy for j in journal]),
+            'stress': _avg([j.stress for j in journal]),
+            'hunger': _avg([j.hunger for j in journal]),
+        }
+        muscle_totals, _ = _muscle_tonnage_from_rows(perf, muscle_by_name)
+        sessions = len({e.entry_date for e in perf})
         total_tonnage = round(sum(muscle_totals.values()), 1)
         out.append({
             'offset': offset,
@@ -1158,6 +1680,46 @@ def stats_exercises():
     ])
 
 
+@api_bp.get('/stats/exercises-by-muscle')
+@login_required
+def stats_exercises_by_muscle():
+    athlete_id = _scope_athlete_id(request.args.get('athlete_id'))
+    if athlete_id is None:
+        return jsonify({'error': 'athlete_id requis'}), 400
+    muscle_by_name = {e.name: e.muscle_group for e in Exercise.query.all()}
+    entries = PerformanceEntry.query.filter_by(athlete_id=athlete_id).all()
+    ex_meta = {}
+    for e in entries:
+        if not e.exercise:
+            continue
+        meta = ex_meta.setdefault(e.exercise, {'last': e.entry_date, 'entries': 0, 'tonnage': 0.0})
+        meta['entries'] += 1
+        if e.entry_date and (meta['last'] is None or e.entry_date > meta['last']):
+            meta['last'] = e.entry_date
+        if e.load is not None and e.reps is not None:
+            meta['tonnage'] += e.load * e.reps
+    by_muscle = {}
+    for name, meta in ex_meta.items():
+        muscle = muscle_by_name.get(name, 'Autre') or 'Autre'
+        bucket = by_muscle.setdefault(muscle, {'tonnage': 0.0, 'exercises': []})
+        bucket['tonnage'] += meta['tonnage']
+        bucket['exercises'].append({
+            'name': name,
+            'last_date': meta['last'].isoformat() if meta['last'] else None,
+            'entries': meta['entries'],
+        })
+    out = []
+    for muscle, bucket in by_muscle.items():
+        bucket['exercises'].sort(key=lambda e: e['last_date'] or '', reverse=True)
+        out.append({
+            'muscle': muscle,
+            'tonnage': round(bucket['tonnage'], 1),
+            'exercises': bucket['exercises'],
+        })
+    out.sort(key=lambda m: -m['tonnage'])
+    return jsonify(out)
+
+
 @api_bp.get('/stats/exercise-history')
 @login_required
 def stats_exercise_history():
@@ -1165,7 +1727,7 @@ def stats_exercise_history():
     exercise = (request.args.get('exercise') or '').strip()
     if athlete_id is None or not exercise:
         return jsonify({'error': 'athlete_id et exercise requis'}), 400
-    days = int(request.args.get('days', 90))
+    days = max(1, min(int(request.args.get('days', 90)), 180))
     cutoff = date.today() - timedelta(days=days)
     entries = (PerformanceEntry.query
                .filter(PerformanceEntry.athlete_id == athlete_id,
@@ -1176,7 +1738,10 @@ def stats_exercise_history():
     by_date = {}
     for e in entries:
         d = e.entry_date.isoformat()
-        bucket = by_date.setdefault(d, {'loads': [], 'reps': [], 'tonnage': 0.0, 'series': 0})
+        bucket = by_date.setdefault(d, {
+            'loads': [], 'reps': [], 'tonnage': 0.0, 'series': 0,
+            'series_rows': [],
+        })
         if e.load is not None:
             bucket['loads'].append(e.load)
         if e.reps is not None:
@@ -1184,6 +1749,12 @@ def stats_exercise_history():
         if e.load is not None and e.reps is not None:
             bucket['tonnage'] += e.load * e.reps
         bucket['series'] += 1
+        bucket['series_rows'].append({
+            'series_number': e.series_number,
+            'reps': e.reps,
+            'load': e.load,
+            'notes': e.notes,
+        })
 
     sessions = []
     for d, b in sorted(by_date.items()):
@@ -1194,8 +1765,87 @@ def stats_exercise_history():
             'avg_reps': round(sum(b['reps']) / len(b['reps']), 1) if b['reps'] else None,
             'tonnage': round(b['tonnage'], 1),
             'series_count': b['series'],
+            'series': b['series_rows'],
         })
     return jsonify({'exercise': exercise, 'sessions': sessions})
+
+
+@api_bp.get('/stats/series-breakdown')
+@login_required
+def stats_series_breakdown():
+    athlete_id = _scope_athlete_id(request.args.get('athlete_id'))
+    start = _parse_date(request.args.get('start'))
+    end = _parse_date(request.args.get('end'))
+    if athlete_id is None or not start or not end:
+        return jsonify({'error': 'athlete_id, start et end requis'}), 400
+    group = (request.args.get('group') or 'week').strip()
+    if group not in ('day', 'week', 'month'):
+        group = 'week'
+    muscle_filter = (request.args.get('muscle') or '').strip() or None
+    exercise_filter = (request.args.get('exercise') or '').strip() or None
+    muscle_by_name = {e.name: e.muscle_group for e in Exercise.query.all()}
+
+    query = PerformanceEntry.query.filter(
+        PerformanceEntry.athlete_id == athlete_id,
+        PerformanceEntry.entry_date >= start,
+        PerformanceEntry.entry_date <= end,
+    )
+    if exercise_filter:
+        query = query.filter(PerformanceEntry.exercise == exercise_filter)
+    entries = query.order_by(PerformanceEntry.entry_date.asc(), PerformanceEntry.series_number.asc()).all()
+
+    buckets = {}
+    total_tonnage = 0.0
+    total_series = 0
+    for e in entries:
+        muscle = muscle_by_name.get(e.exercise, 'Autre') or 'Autre'
+        if muscle_filter and muscle != muscle_filter:
+            continue
+        if group == 'day':
+            key = e.entry_date.isoformat()
+            label = key
+        elif group == 'month':
+            key = e.entry_date.strftime('%Y-%m')
+            label = key
+        else:
+            ws = _week_start(e.entry_date)
+            key = ws.isoformat()
+            label = f"Sem. {ws.isoformat()}"
+        bucket = buckets.setdefault(key, {
+            'key': key, 'label': label, 'tonnage': 0.0, 'series_count': 0, 'series': [],
+        })
+        ton = (e.load * e.reps) if (e.load is not None and e.reps is not None) else 0
+        bucket['tonnage'] += ton
+        bucket['series_count'] += 1
+        total_tonnage += ton
+        total_series += 1
+        bucket['series'].append({
+            'date': e.entry_date.isoformat(),
+            'exercise': e.exercise,
+            'muscle': muscle,
+            'series_number': e.series_number,
+            'reps': e.reps,
+            'load': e.load,
+            'notes': e.notes,
+            'tonnage': round(ton, 1),
+        })
+
+    out_buckets = []
+    for key in sorted(buckets.keys()):
+        b = buckets[key]
+        b['tonnage'] = round(b['tonnage'], 1)
+        out_buckets.append(b)
+
+    return jsonify({
+        'start': start.isoformat(),
+        'end': end.isoformat(),
+        'group': group,
+        'muscle': muscle_filter,
+        'exercise': exercise_filter,
+        'buckets': out_buckets,
+        'total_tonnage': round(total_tonnage, 1),
+        'total_series': total_series,
+    })
 
 
 @api_bp.get('/stats/daily-activity')
@@ -1236,6 +1886,147 @@ def stats_daily_activity():
         })
         cur += timedelta(days=1)
     return jsonify(out)
+
+
+@api_bp.get('/stats/coach-bootstrap')
+@login_required
+def stats_coach_bootstrap():
+    """Une seule requête pour l'écran Stats coach (remplace 4 appels parallèles)."""
+    athlete_id = _scope_athlete_id(request.args.get('athlete_id'))
+    if athlete_id is None:
+        return jsonify({'error': 'athlete_id requis'}), 400
+    days = max(1, min(int(request.args.get('days', 180)), 180))
+    weeks = max(1, min(int(request.args.get('weeks', 24)), 24))
+    muscle_by_name = {e.name: e.muscle_group for e in Exercise.query.all()}
+
+    cutoff = date.today() - timedelta(days=days - 1)
+    oldest_start, _ = _week_bounds(weeks - 1)
+    range_start = min(cutoff, oldest_start)
+    today = date.today()
+
+    journal_all = (JournalEntry.query
+                   .filter(JournalEntry.athlete_id == athlete_id,
+                           JournalEntry.entry_date >= range_start)
+                   .order_by(JournalEntry.entry_date.asc())
+                   .all())
+    perf_all = (PerformanceEntry.query
+                .filter(PerformanceEntry.athlete_id == athlete_id,
+                        PerformanceEntry.entry_date >= range_start)
+                .all())
+
+    # daily activity
+    by_date = {}
+    for e in perf_all:
+        if e.entry_date < cutoff:
+            continue
+        d = e.entry_date.isoformat()
+        bucket = by_date.setdefault(d, {'series': 0, 'tonnage': 0.0, 'exercises': set()})
+        bucket['series'] += 1
+        if e.load is not None and e.reps is not None:
+            bucket['tonnage'] += e.load * e.reps
+        if e.exercise:
+            bucket['exercises'].add(e.exercise)
+    daily_activity = []
+    cur = cutoff
+    while cur <= today:
+        key = cur.isoformat()
+        b = by_date.get(key)
+        daily_activity.append({
+            'date': key,
+            'trained': bool(b and b['series'] > 0),
+            'series_count': b['series'] if b else 0,
+            'exercise_count': len(b['exercises']) if b else 0,
+            'tonnage': round(b['tonnage'], 1) if b else 0,
+        })
+        cur += timedelta(days=1)
+
+    journal_trend = [
+        {
+            'date': e.entry_date.isoformat(),
+            'weight': e.weight,
+            'protein': e.protein,
+            'carbs': e.carbs,
+            'fats': e.fats,
+            'kcals': e.kcals,
+            'water_ml': e.water_ml,
+            'steps': e.steps,
+            'sleep_hours': e.sleep_hours,
+            'energy': e.energy,
+            'stress': e.stress,
+            'hunger': e.hunger,
+        }
+        for e in journal_all if e.entry_date >= cutoff
+    ]
+
+    overview_weeks = []
+    for offset in range(weeks - 1, -1, -1):
+        start, end = _week_bounds(offset)
+        journal = [j for j in journal_all if start <= j.entry_date <= end]
+        perf = [p for p in perf_all if start <= p.entry_date <= end]
+        health = {
+            'weight': _avg([j.weight for j in journal]),
+            'kcals': _avg([j.kcals for j in journal]),
+            'water_ml': _avg([j.water_ml for j in journal]),
+            'sleep_hours': _avg([j.sleep_hours for j in journal]),
+            'protein': _avg([j.protein for j in journal]),
+            'carbs': _avg([j.carbs for j in journal]),
+            'fats': _avg([j.fats for j in journal]),
+            'steps': _avg([j.steps for j in journal]),
+            'energy': _avg([j.energy for j in journal]),
+            'stress': _avg([j.stress for j in journal]),
+            'hunger': _avg([j.hunger for j in journal]),
+        }
+        muscle_totals, _ = _muscle_tonnage_from_rows(perf, muscle_by_name)
+        overview_weeks.append({
+            'offset': offset,
+            'label': _week_label(offset),
+            'start': start.isoformat(),
+            'end': end.isoformat(),
+            'sessions': len({e.entry_date for e in perf}),
+            'total_tonnage': round(sum(muscle_totals.values()), 1),
+            'health': health,
+            'muscles': [
+                {'muscle': m, 'tonnage': round(t, 1)}
+                for m, t in sorted(muscle_totals.items(), key=lambda kv: -kv[1])
+            ],
+        })
+
+    by_muscle = {}
+    ex_meta = {}
+    for e in perf_all:
+        if not e.exercise:
+            continue
+        meta = ex_meta.setdefault(e.exercise, {'last': e.entry_date, 'entries': 0, 'tonnage': 0.0})
+        meta['entries'] += 1
+        if e.entry_date > meta['last']:
+            meta['last'] = e.entry_date
+        if e.load is not None and e.reps is not None:
+            meta['tonnage'] += e.load * e.reps
+    for name, meta in ex_meta.items():
+        muscle = muscle_by_name.get(name, 'Autre') or 'Autre'
+        bucket = by_muscle.setdefault(muscle, {'tonnage': 0.0, 'exercises': []})
+        bucket['tonnage'] += meta['tonnage']
+        bucket['exercises'].append({
+            'name': name,
+            'last_date': meta['last'].isoformat() if meta['last'] else None,
+            'entries': meta['entries'],
+        })
+    exercises_by_muscle = []
+    for muscle, bucket in by_muscle.items():
+        bucket['exercises'].sort(key=lambda e: e['last_date'] or '', reverse=True)
+        exercises_by_muscle.append({
+            'muscle': muscle,
+            'tonnage': round(bucket['tonnage'], 1),
+            'exercises': bucket['exercises'],
+        })
+    exercises_by_muscle.sort(key=lambda m: -m['tonnage'])
+
+    return jsonify({
+        'daily_activity': daily_activity,
+        'journal_trend': journal_trend,
+        'weekly_overview': {'weeks': overview_weeks},
+        'exercises_by_muscle': exercises_by_muscle,
+    })
 
 
 # -------------------------------------------------------------- FOOD BANK -
@@ -1301,15 +2092,25 @@ def list_meal_plans():
     athlete_id = _scope_athlete_id(request.args.get('athlete_id'))
     if athlete_id is None:
         return jsonify({'error': 'athlete_id requis'}), 400
-    plans = MealPlan.query.filter_by(athlete_id=athlete_id).order_by(MealPlan.created_at.desc()).all()
-    return jsonify([p.to_dict(with_meals=False) for p in plans])
+    # Eager-load meals + foods : to_dict() calcule toujours les totaux via
+    # get_daily_totals(), et with_meals=1 sert l'écran Nutrition en 1 seul
+    # round-trip (évite le N+1 côté mobile qui timeout sur Railway).
+    from sqlalchemy.orm import selectinload, joinedload
+    with_meals = str(request.args.get('with_meals', '0')).lower() in ('1', 'true', 'yes')
+    plans = (
+        MealPlan.query.filter_by(athlete_id=athlete_id)
+        .options(selectinload(MealPlan.meals).joinedload(MealEntry.food))
+        .order_by(MealPlan.is_active.desc(), MealPlan.created_at.desc())
+        .all()
+    )
+    return jsonify([p.to_dict(with_meals=with_meals) for p in plans])
 
 
 @api_bp.get('/meal-plans/<int:plan_id>')
 @login_required
 def get_meal_plan(plan_id):
     plan = MealPlan.query.get_or_404(plan_id)
-    if request.current_user.role != 'coach' and plan.athlete_id != request.current_user.id:
+    if not _is_staff() and plan.athlete_id != request.current_user.id:
         return jsonify({'error': 'AccÃ¨s refusÃ©'}), 403
     return jsonify(plan.to_dict(with_meals=True))
 
@@ -1322,8 +2123,9 @@ def create_meal_plan():
     athlete_id = data.get('athlete_id')
     if not name or not athlete_id:
         return jsonify({'error': 'name et athlete_id requis'}), 400
+    has_any = MealPlan.query.filter_by(athlete_id=athlete_id).count() > 0
     plan = MealPlan(name=name, athlete_id=athlete_id, coach_id=request.current_user.id,
-                     meal_count=data.get('meal_count', 6))
+                     meal_count=data.get('meal_count', 6), is_active=not has_any)
     db.session.add(plan)
     db.session.commit()
     return jsonify(plan.to_dict()), 201
@@ -1333,9 +2135,37 @@ def create_meal_plan():
 @coach_required
 def delete_meal_plan(plan_id):
     plan = MealPlan.query.get_or_404(plan_id)
+    athlete_id = plan.athlete_id
+    was_active = bool(plan.is_active)
     db.session.delete(plan)
+    db.session.flush()
+    if was_active:
+        fallback = (
+            MealPlan.query.filter_by(athlete_id=athlete_id)
+            .order_by(MealPlan.created_at.desc())
+            .first()
+        )
+        if fallback:
+            fallback.is_active = True
     db.session.commit()
     return jsonify({'ok': True})
+
+
+@api_bp.post('/meal-plans/<int:plan_id>/activate')
+@login_required
+def activate_meal_plan(plan_id):
+    """Mark a meal plan as the athlete's active diet (used by the Journal
+    'diète respectée' shortcut to know which macros to apply)."""
+    plan = MealPlan.query.get_or_404(plan_id)
+    user = request.current_user
+    if not _is_staff(user) and plan.athlete_id != user.id:
+        return jsonify({'error': 'AccÃ¨s refusÃ©'}), 403
+    MealPlan.query.filter_by(athlete_id=plan.athlete_id, is_active=True).update(
+        {'is_active': False}, synchronize_session=False,
+    )
+    plan.is_active = True
+    db.session.commit()
+    return jsonify(plan.to_dict())
 
 
 @api_bp.put('/meal-plans/<int:plan_id>')
@@ -1444,18 +2274,7 @@ def _avg(values):
     return round(sum(values) / len(values), 1) if values else None
 
 
-def _weekly_metrics(athlete_id, week_start):
-    week_end = week_start + timedelta(days=6)
-
-    journal = (JournalEntry.query
-               .filter(JournalEntry.athlete_id == athlete_id,
-                       JournalEntry.entry_date >= week_start, JournalEntry.entry_date <= week_end)
-               .all())
-    perf = (PerformanceEntry.query
-            .filter(PerformanceEntry.athlete_id == athlete_id,
-                    PerformanceEntry.entry_date >= week_start, PerformanceEntry.entry_date <= week_end)
-            .all())
-
+def _weekly_metrics_from_rows(journal, perf):
     tonnage = sum((e.reps or 0) * (e.load or 0) for e in perf)
     sessions = len({e.entry_date for e in perf})
 
@@ -1469,6 +2288,21 @@ def _weekly_metrics(athlete_id, week_start):
         'sessions': sessions,
         'entries_logged': len(journal),
     }
+
+
+def _weekly_metrics(athlete_id, week_start):
+    week_end = week_start + timedelta(days=6)
+
+    journal = (JournalEntry.query
+               .filter(JournalEntry.athlete_id == athlete_id,
+                       JournalEntry.entry_date >= week_start, JournalEntry.entry_date <= week_end)
+               .all())
+    perf = (PerformanceEntry.query
+            .filter(PerformanceEntry.athlete_id == athlete_id,
+                    PerformanceEntry.entry_date >= week_start, PerformanceEntry.entry_date <= week_end)
+            .all())
+
+    return _weekly_metrics_from_rows(journal, perf)
 
 
 METRIC_LABELS = [
@@ -1489,29 +2323,82 @@ def weekly_bilan():
     today = date.today()
     current_start = _week_start(today)
     previous_start = current_start - timedelta(days=7)
-
-    athletes = User.query.filter_by(role='athlete').order_by(User.username).all()
-    muscle_by_name = {e.name: e.muscle_group for e in Exercise.query.all()}
     current_end = current_start + timedelta(days=6)
     previous_end = previous_start + timedelta(days=6)
+    attention_cutoff = today - timedelta(days=180)
+
+    athletes = User.query.filter_by(role='athlete').order_by(User.username).all()
+    if request.current_user.role == 'coach':
+        athletes = [a for a in athletes if a.coach_id == request.current_user.id]
+    if not athletes:
+        return jsonify([])
+    athlete_ids = [a.id for a in athletes]
+
+    muscle_by_name = {e.name: e.muscle_group for e in Exercise.query.all()}
+
+    # Requêtes groupées pour TOUS les athlètes en une fois (au lieu d'une
+    # boucle de ~9 requêtes par athlète) : évite les timeouts côté mobile
+    # quand l'équipe compte plusieurs athlètes.
+    journal_rows = (JournalEntry.query
+                     .filter(JournalEntry.athlete_id.in_(athlete_ids),
+                             JournalEntry.entry_date >= previous_start,
+                             JournalEntry.entry_date <= current_end)
+                     .all())
+    journal_by_athlete = {}
+    for j in journal_rows:
+        journal_by_athlete.setdefault(j.athlete_id, []).append(j)
+
+    perf_rows = (PerformanceEntry.query
+                 .filter(PerformanceEntry.athlete_id.in_(athlete_ids),
+                         PerformanceEntry.entry_date >= attention_cutoff)
+                 .all())
+    perf_by_athlete = {}
+    for p in perf_rows:
+        perf_by_athlete.setdefault(p.athlete_id, []).append(p)
+
+    markings = (WeeklyBilanMarking.query
+                .filter(WeeklyBilanMarking.athlete_id.in_(athlete_ids),
+                        WeeklyBilanMarking.week_start == current_start)
+                .all())
+    marking_by_athlete = {m.athlete_id: m for m in markings}
+
+    objectives_rows = (Objective.query
+                        .filter(Objective.athlete_id.in_(athlete_ids))
+                        .order_by(Objective.athlete_id, Objective.created_at.desc())
+                        .all())
+    objectives_by_athlete = {}
+    for o in objectives_rows:
+        bucket = objectives_by_athlete.setdefault(o.athlete_id, [])
+        if len(bucket) < 5:
+            bucket.append(o)
 
     result = []
     for a in athletes:
-        current = _weekly_metrics(a.id, current_start)
-        previous = _weekly_metrics(a.id, previous_start)
+        perf_all = perf_by_athlete.get(a.id, [])
+        journal_all = journal_by_athlete.get(a.id, [])
+
+        cur_journal = [j for j in journal_all if current_start <= j.entry_date <= current_end]
+        prev_journal = [j for j in journal_all if previous_start <= j.entry_date <= previous_end]
+        cur_perf = [p for p in perf_all if current_start <= p.entry_date <= current_end]
+        prev_perf = [p for p in perf_all if previous_start <= p.entry_date <= previous_end]
+
+        current = _weekly_metrics_from_rows(cur_journal, cur_perf)
+        previous = _weekly_metrics_from_rows(prev_journal, prev_perf)
         metrics = []
         for key, label in METRIC_LABELS:
             cur_v, prev_v = current[key], previous[key]
             diff = round(cur_v - prev_v, 1) if cur_v is not None and prev_v is not None else None
             metrics.append({'key': key, 'label': label, 'current': cur_v, 'previous': prev_v, 'diff': diff})
 
-        marking = WeeklyBilanMarking.query.filter_by(athlete_id=a.id, week_start=current_start).first()
-        objectives = Objective.query.filter_by(athlete_id=a.id).order_by(Objective.created_at.desc()).limit(5).all()
+        marking = marking_by_athlete.get(a.id)
+        objectives = objectives_by_athlete.get(a.id, [])
 
-        muscle_a, ex_a = _muscle_tonnage_for_range(a.id, current_start, current_end, muscle_by_name)
-        muscle_b, ex_b = _muscle_tonnage_for_range(a.id, previous_start, previous_end, muscle_by_name)
+        muscle_a, ex_a = _muscle_tonnage_from_rows(cur_perf, muscle_by_name)
+        muscle_b, ex_b = _muscle_tonnage_from_rows(prev_perf, muscle_by_name)
         muscle_rows = _build_muscle_rows(muscle_a, ex_a, muscle_b, ex_b)
-        attention = _analyse_attention(a.id, 0, 1)
+
+        series_by_ex = _series_by_exercise_from_rows(perf_all)
+        attention = _analyse_attention_from_series(series_by_ex, 0, 1)
 
         result.append({
             'athlete': a.to_dict(),
@@ -1563,6 +2450,17 @@ def unmark_weekly_bilan():
 @coach_required
 def bilan_unchecked_count():
     current_start = _week_start(date.today())
-    total_athletes = User.query.filter_by(role='athlete').count()
-    marked = WeeklyBilanMarking.query.filter_by(week_start=current_start, done=True).count()
+    if request.current_user.role == 'coach':
+        athletes = _coach_team_query(request.current_user.id).all()
+    else:
+        athletes = User.query.filter_by(role='athlete').all()
+    athlete_ids = [a.id for a in athletes]
+    total_athletes = len(athlete_ids)
+    marked = 0
+    if athlete_ids:
+        marked = WeeklyBilanMarking.query.filter(
+            WeeklyBilanMarking.athlete_id.in_(athlete_ids),
+            WeeklyBilanMarking.week_start == current_start,
+            WeeklyBilanMarking.done.is_(True),
+        ).count()
     return jsonify({'unchecked_count': max(total_athletes - marked, 0)})

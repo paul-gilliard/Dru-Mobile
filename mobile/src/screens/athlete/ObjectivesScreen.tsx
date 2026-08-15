@@ -7,12 +7,14 @@ import { createObjective, deleteObjective, listObjectives } from '../../api/reso
 import { apiErrorMessage } from '../../api/client';
 import { ObjectiveDTO } from '../../api/types';
 import { Button, Card, EmptyState, ErrorView, Input, LoadingView, SectionTitle } from '../../components/ui';
+import { Icon } from '../../components/Icon';
 import { colors, fontSize, spacing } from '../../theme';
+import { TAB_BAR_CLEARANCE } from '../../navigation/useTabBarStyle';
 
 export default function ObjectivesScreen() {
   const { user } = useAuth();
   const { athleteId } = useAthleteScope();
-  const isCoach = user?.role === 'coach';
+  const isCoach = user?.role === 'coach' || user?.role === 'admin';
 
   const [objectives, setObjectives] = useState<ObjectiveDTO[]>([]);
   const [loading, setLoading] = useState(true);
@@ -71,7 +73,7 @@ export default function ObjectivesScreen() {
     >
       {isCoach && (
         <Card style={{ marginBottom: spacing.lg }}>
-          <SectionTitle icon="🎯">Nouvel objectif</SectionTitle>
+          <SectionTitle icon="target">Nouvel objectif</SectionTitle>
           <Input placeholder="Titre" value={title} onChangeText={setTitle} />
           <Input
             placeholder="Description (optionnel)"
@@ -85,12 +87,14 @@ export default function ObjectivesScreen() {
       )}
 
       {objectives.length === 0 ? (
-        <EmptyState icon="🎯" title="Aucun objectif" subtitle="Aucun objectif n'a encore été défini." />
+        <EmptyState icon="target" title="Aucun objectif" subtitle="Aucun objectif n'a encore été défini." />
       ) : (
         objectives.map((o) => (
           <Card key={o.id} style={{ marginBottom: spacing.md }} glow>
             <View style={styles.row}>
-              <Text style={styles.icon}>🎯</Text>
+              <View style={styles.iconWrap}>
+                <Icon name="target" size={16} color={colors.primary} />
+              </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.title}>{o.title}</Text>
                 {o.description ? <Text style={styles.description}>{o.description}</Text> : null}
@@ -108,9 +112,12 @@ export default function ObjectivesScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.lg, paddingBottom: spacing.xxl },
+  content: { padding: spacing.lg, paddingBottom: spacing.xxl + TAB_BAR_CLEARANCE },
   row: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
-  icon: { fontSize: 20 },
+  iconWrap: {
+    width: 32, height: 32, borderRadius: 16, backgroundColor: colors.primarySoft,
+    alignItems: 'center', justifyContent: 'center',
+  },
   title: { color: colors.text, fontWeight: '800', fontSize: fontSize.md },
   description: { color: colors.textMuted, marginTop: spacing.xs },
   deleteButton: { paddingVertical: spacing.xs, paddingHorizontal: spacing.sm },

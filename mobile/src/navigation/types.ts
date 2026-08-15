@@ -15,7 +15,8 @@ export type CoachStackParamList = {
   Dashboard: undefined;
   AthleteDetail: { athleteId: number; athleteName: string };
   SessionDetail: { sessionId: number; athleteId?: number; readOnly?: boolean; logDate?: string };
-  CreateAthlete: undefined;
+  InviteAthlete: undefined;
+  ManageTeam: undefined;
   Users: undefined;
   MealPlans: undefined;
   MealPlanEditor: { planId: number; planName: string };

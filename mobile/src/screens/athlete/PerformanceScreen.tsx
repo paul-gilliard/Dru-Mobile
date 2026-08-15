@@ -6,7 +6,9 @@ import { listPerformance } from '../../api/resources';
 import { apiErrorMessage } from '../../api/client';
 import { PerformanceEntryDTO } from '../../api/types';
 import { Card, EmptyState, ErrorView, LoadingView, SectionTitle } from '../../components/ui';
+import { Icon } from '../../components/Icon';
 import { colors, fontSize, spacing } from '../../theme';
+import { TAB_BAR_CLEARANCE } from '../../navigation/useTabBarStyle';
 import { formatDateFR } from '../../utils/format';
 
 export default function PerformanceScreen() {
@@ -44,16 +46,19 @@ export default function PerformanceScreen() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
     >
       {grouped.length === 0 ? (
-        <EmptyState icon="📈" title="Aucune performance enregistrée" subtitle="Log tes séries depuis l'écran d'une séance." />
+        <EmptyState icon="trend-up" title="Aucune performance enregistrée" subtitle="Log tes séries depuis l'écran d'une séance." />
       ) : (
         grouped.map(({ date, exercises }) => (
           <Card key={date} style={{ marginBottom: spacing.lg }}>
-            <SectionTitle icon="📅">{formatDateFR(date)}</SectionTitle>
+            <SectionTitle icon="calendar">{formatDateFR(date)}</SectionTitle>
             {exercises.map(({ exercise, series }) => {
               const bestLoad = series.reduce((max, s) => (s.load && s.load > max ? s.load : max), 0);
               return (
                 <View key={exercise} style={styles.exerciseBlock}>
-                  <Text style={styles.exerciseName}>🏋️ {exercise}</Text>
+                  <View style={styles.exerciseNameRow}>
+                    <Icon name="exercise" size={13} color={colors.text} />
+                    <Text style={styles.exerciseName}>{exercise}</Text>
+                  </View>
                   <View style={styles.seriesRow}>
                     {series.map((s) => {
                       const isBest = !!s.load && s.load === bestLoad && bestLoad > 0;
@@ -97,9 +102,10 @@ function groupByDateAndExercise(entries: PerformanceEntryDTO[]) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.lg, paddingBottom: spacing.xxl },
+  content: { padding: spacing.lg, paddingBottom: spacing.xxl + TAB_BAR_CLEARANCE },
   exerciseBlock: { marginTop: spacing.sm, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm },
-  exerciseName: { color: colors.text, fontWeight: '800', marginBottom: spacing.sm },
+  exerciseNameRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: spacing.sm },
+  exerciseName: { color: colors.text, fontWeight: '800' },
   seriesRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   seriesChip: { backgroundColor: colors.surfaceAlt, borderRadius: 10, paddingHorizontal: spacing.sm, paddingVertical: 5 },
   seriesChipBest: { backgroundColor: colors.goldSoft, borderWidth: 1, borderColor: colors.gold },

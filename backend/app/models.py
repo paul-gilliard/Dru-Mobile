@@ -9,10 +9,20 @@ MUSCLE_GROUPS = [
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(64), unique=True, nullable=False)
+    username = db.Column(db.String(255), unique=True, nullable=False)
+    email = db.Column(db.String(255), unique=True, nullable=True, index=True)
     password_hash = db.Column(db.String(255), nullable=False)
-    role = db.Column(db.String(16), nullable=False, default='athlete')  # 'coach' ou 'athlete'
+    # 'athlete' | 'coach' | 'admin'
+    role = db.Column(db.String(16), nullable=False, default='athlete')
     display_name = db.Column(db.String(128), nullable=True)
+    coach_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True, index=True)
+    coach_associated_at = db.Column(db.DateTime, nullable=True)
+    # Coach only: 0=1 athlète, 1=3, 2=6, 3=illimité
+    subscription_tier = db.Column(db.Integer, nullable=False, default=0)
+
+    coach = db.relationship('User', remote_side=[id], foreign_keys=[coach_id], backref='athletes')
+
+    SUBSCRIPTION_LIMITS = {0: 1, 1: 3, 2: 6, 3: None}
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -20,16 +30,55 @@ class User(db.Model):
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
 
+    def athlete_limit(self):
+        return self.SUBSCRIPTION_LIMITS.get(int(self.subscription_tier or 0), 1)
+
     def to_dict(self):
-        return {
+        data = {
             'id': self.id,
             'username': self.username,
+            'email': self.email,
             'role': self.role,
             'display_name': self.display_name or self.username,
+            'coach_id': self.coach_id,
+            'coach_associated_at': self.coach_associated_at.isoformat() if self.coach_associated_at else None,
+            'subscription_tier': int(self.subscription_tier or 0) if self.role in ('coach', 'admin') else None,
+            'athlete_limit': self.athlete_limit() if self.role == 'coach' else None,
         }
+        if self.role == 'athlete' and self.coach_id and self.coach:
+            data['coach_name'] = self.coach.display_name or self.coach.username
+        return data
 
     def __repr__(self):
         return f'<User {self.username} ({self.role})>'
+
+
+class CoachingInvitation(db.Model):
+    __tablename__ = 'coaching_invitation'
+    id = db.Column(db.Integer, primary_key=True)
+    coach_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    athlete_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    status = db.Column(db.String(16), nullable=False, default='pending')  # pending|accepted|refused
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    coach = db.relationship('User', foreign_keys=[coach_id])
+    athlete = db.relationship('User', foreign_keys=[athlete_id])
+
+    __table_args__ = (
+        db.Index('idx_invitation_athlete_status', 'athlete_id', 'status'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'coach_id': self.coach_id,
+            'athlete_id': self.athlete_id,
+            'status': self.status,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'coach_name': (self.coach.display_name or self.coach.username) if self.coach else None,
+            'athlete_name': (self.athlete.display_name or self.athlete.username) if self.athlete else None,
+            'athlete_username': self.athlete.username if self.athlete else None,
+        }
 
 
 class Availability(db.Model):
@@ -282,6 +331,7 @@ class MealPlan(db.Model):
     name = db.Column(db.String(128), nullable=False)
     athlete_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     coach_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    is_active = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     meal_time_1 = db.Column(db.String(5), nullable=True)
@@ -320,6 +370,7 @@ class MealPlan(db.Model):
             'name': self.name,
             'athlete_id': self.athlete_id,
             'coach_id': self.coach_id,
+            'is_active': bool(self.is_active),
             'meal_count': self.meal_count or 6,
             'meal_times': [getattr(self, f'meal_time_{i}') for i in range(1, 7)],
             'meal_labels': [getattr(self, f'meal_label_{i}') for i in range(1, 7)],

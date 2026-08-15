@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleProp, StyleSheet, Text, TextStyle, View, ViewStyle } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { getWeeklyComparison } from '../api/resources';
 import { apiErrorMessage } from '../api/client';
 import { MuscleComparisonRowDTO, WeeklyComparisonDTO } from '../api/types';
 import { colors, fontSize, muscleColors, radius, spacing } from '../theme';
 import { Button, Card, SectionTitle } from './ui';
+import { Icon, IconName } from './Icon';
 
 function diffColor(diff: number | null) {
   if (diff == null) return colors.textFaint;
@@ -12,10 +14,27 @@ function diffColor(diff: number | null) {
   return diff > 0 ? colors.success : colors.danger;
 }
 
-function fmtDiff(diff: number | null) {
+function trendIcon(diff: number | null): IconName {
+  if (diff == null || Math.abs(diff) < 0.1) return 'trend-flat';
+  return diff > 0 ? 'trend-up' : 'trend-down';
+}
+
+function fmtDiffText(diff: number | null, unit?: string) {
   if (diff == null) return '—';
-  if (Math.abs(diff) < 0.1) return '→ stable';
-  return diff > 0 ? `↑ +${diff}` : `↓ ${diff}`;
+  if (Math.abs(diff) < 0.1) return 'stable';
+  return `${diff > 0 ? '+' : ''}${diff}${unit ? ` ${unit}` : ''}`;
+}
+
+/** Ligne compacte icône de tendance + valeur — remplace les flèches unicode ↑ ↓ →. */
+function DiffValue({
+  diff, unit, cellStyle, textStyle,
+}: { diff: number | null; unit?: string; cellStyle?: StyleProp<ViewStyle>; textStyle?: StyleProp<TextStyle> }) {
+  return (
+    <View style={[styles.diffRow, cellStyle]}>
+      {diff != null ? <Icon name={trendIcon(diff)} size={12} color={diffColor(diff)} /> : null}
+      <Text style={textStyle}>{fmtDiffText(diff, unit)}</Text>
+    </View>
+  );
 }
 
 function MuscleDetailModal({
@@ -23,7 +42,7 @@ function MuscleDetailModal({
 }: { row: MuscleComparisonRowDTO | null; onClose: () => void }) {
   return (
     <Modal visible={!!row} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.modalOverlay}>
+      <BlurView intensity={35} tint="dark" style={styles.modalOverlay}>
         <View style={styles.modalCard}>
           <ScrollView>
             <Text style={styles.modalTitle}>{row?.muscle} — détail par exercice</Text>
@@ -36,9 +55,16 @@ function MuscleDetailModal({
                   <View style={styles.modalExValsRow}>
                     <Text style={styles.modalExVal}>{ex.current} kg</Text>
                     <Text style={styles.modalExValFaint}>{ex.previous} kg</Text>
-                    <Text style={[styles.modalExPct, { color: ex.diff_pct > 0 ? colors.success : ex.diff_pct < 0 ? colors.danger : colors.textFaint }]}>
-                      {ex.diff_pct > 0 ? '▲' : ex.diff_pct < 0 ? '▼' : '→'} {ex.diff_pct > 0 ? '+' : ''}{ex.diff_pct}%
-                    </Text>
+                    <View style={[styles.diffRow, { marginLeft: 'auto' }]}>
+                      <Icon
+                        name={ex.diff_pct > 0 ? 'trend-up' : ex.diff_pct < 0 ? 'trend-down' : 'trend-flat'}
+                        size={13}
+                        color={ex.diff_pct > 0 ? colors.success : ex.diff_pct < 0 ? colors.danger : colors.textFaint}
+                      />
+                      <Text style={[styles.modalExPct, { color: ex.diff_pct > 0 ? colors.success : ex.diff_pct < 0 ? colors.danger : colors.textFaint }]}>
+                        {ex.diff_pct > 0 ? '+' : ''}{ex.diff_pct}%
+                      </Text>
+                    </View>
                   </View>
                 </View>
               ))
@@ -46,21 +72,33 @@ function MuscleDetailModal({
           </ScrollView>
           <Button title="Fermer" onPress={onClose} style={{ marginTop: spacing.md }} />
         </View>
-      </View>
+      </BlurView>
     </Modal>
   );
 }
 
 export default function WeeklyComparisonCard({
-  athleteId, weekA, weekB,
-}: { athleteId: number; weekA: number; weekB: number }) {
-  const [data, setData] = useState<WeeklyComparisonDTO | null>(null);
-  const [loading, setLoading] = useState(true);
+  athleteId, weekA, weekB, initialData,
+}: {
+  athleteId: number;
+  weekA: number;
+  weekB: number;
+  initialData?: WeeklyComparisonDTO | null;
+}) {
+  const canUseSeed = weekA === 0 && weekB === 1 && initialData;
+  const [data, setData] = useState<WeeklyComparisonDTO | null>(canUseSeed ? initialData : null);
+  const [loading, setLoading] = useState(!canUseSeed);
   const [error, setError] = useState<string | null>(null);
   const [openMuscle, setOpenMuscle] = useState<MuscleComparisonRowDTO | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    if (weekA === 0 && weekB === 1 && initialData) {
+      setData(initialData);
+      setLoading(false);
+      setError(null);
+      return () => { cancelled = true; };
+    }
     setLoading(true);
     setError(null);
     (async () => {
@@ -77,7 +115,7 @@ export default function WeeklyComparisonCard({
       }
     })();
     return () => { cancelled = true; };
-  }, [athleteId, weekA, weekB]);
+  }, [athleteId, weekA, weekB, initialData]);
 
   if (loading && !data) {
     return <Card style={{ marginBottom: spacing.lg, alignItems: 'center', paddingVertical: spacing.lg }}><ActivityIndicator color={colors.primary} /></Card>;
@@ -88,7 +126,7 @@ export default function WeeklyComparisonCard({
 
   return (
     <Card style={{ marginBottom: spacing.lg, opacity: loading ? 0.7 : 1 }}>
-      <SectionTitle icon="📊">Comparaison hebdomadaire ({data.week_a.label} vs {data.week_b.label})</SectionTitle>
+      <SectionTitle icon="stats">Comparaison hebdomadaire ({data.week_a.label} vs {data.week_b.label})</SectionTitle>
       <View style={styles.tableHeaderRow}>
         <Text style={[styles.tableCell, styles.tableHeaderText, { flex: 2 }]}>Métrique</Text>
         <Text style={[styles.tableCell, styles.tableHeaderText]}>{data.week_a.label}</Text>
@@ -100,7 +138,7 @@ export default function WeeklyComparisonCard({
           <Text style={[styles.tableCell, styles.metricLabel, { flex: 2 }]}>{m.label}</Text>
           <Text style={styles.tableCell}>{m.current ?? '—'}</Text>
           <Text style={[styles.tableCell, styles.mutedCell]}>{m.previous ?? '—'}</Text>
-          <Text style={[styles.tableCell, { color: diffColor(m.diff), fontWeight: '800', fontSize: fontSize.xs }]}>{fmtDiff(m.diff)}</Text>
+          <DiffValue diff={m.diff} cellStyle={styles.tableCell} textStyle={{ color: diffColor(m.diff), fontWeight: '800', fontSize: fontSize.xs }} />
         </View>
       ))}
 
@@ -111,8 +149,11 @@ export default function WeeklyComparisonCard({
             <Pressable key={row.muscle} onPress={() => setOpenMuscle(row)} style={styles.muscleRow}>
               <View style={[styles.muscleDot, { backgroundColor: muscleColors[row.muscle] ?? colors.primary }]} />
               <Text style={styles.muscleLabel}>{row.muscle}</Text>
-              <Text style={[styles.muscleDiff, { color: diffColor(row.diff) }]}>{fmtDiff(row.diff)} kg</Text>
-              <Text style={styles.muscleDetailLink}>Détails ›</Text>
+              <DiffValue diff={row.diff} unit="kg" textStyle={[styles.muscleDiff, { color: diffColor(row.diff) }]} />
+              <View style={styles.muscleDetailLinkRow}>
+                <Text style={styles.muscleDetailLink}>Détails</Text>
+                <Icon name="chevron-right" size={14} color={colors.secondary} />
+              </View>
             </Pressable>
           ))}
         </>
@@ -138,8 +179,10 @@ const styles = StyleSheet.create({
   muscleDot: { width: 8, height: 8, borderRadius: 4 },
   muscleLabel: { color: colors.text, fontWeight: '700', fontSize: fontSize.sm, flex: 1 },
   muscleDiff: { fontWeight: '800', fontSize: fontSize.xs },
+  muscleDetailLinkRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   muscleDetailLink: { color: colors.secondary, fontSize: fontSize.xs, fontWeight: '700' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: spacing.lg },
+  diffRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(5,6,8,0.35)', justifyContent: 'center', padding: spacing.lg },
   modalCard: {
     backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, maxHeight: '80%',
     borderWidth: 1, borderColor: colors.border,

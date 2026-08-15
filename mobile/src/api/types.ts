@@ -1,10 +1,27 @@
-export type Role = 'coach' | 'athlete';
+export type Role = 'coach' | 'athlete' | 'admin';
 
 export interface UserDTO {
   id: number;
   username: string;
+  email?: string | null;
   role: Role;
   display_name: string;
+  coach_id?: number | null;
+  coach_associated_at?: string | null;
+  coach_name?: string | null;
+  subscription_tier?: number | null;
+  athlete_limit?: number | null;
+}
+
+export interface CoachingInvitationDTO {
+  id: number;
+  coach_id: number;
+  athlete_id: number;
+  status: 'pending' | 'accepted' | 'refused';
+  created_at: string | null;
+  coach_name?: string | null;
+  athlete_name?: string | null;
+  athlete_username?: string | null;
 }
 
 export interface SeriesDTO {
@@ -127,6 +144,7 @@ export interface MealPlanDTO {
   name: string;
   athlete_id: number;
   coach_id: number | null;
+  is_active: boolean;
   meal_count: number;
   meal_times: (string | null)[];
   meal_labels: (string | null)[];
@@ -148,8 +166,12 @@ export interface AthleteSummaryDTO {
 }
 
 export interface CoachDashboardDTO {
-  role: 'coach';
+  role: 'coach' | 'admin';
   athletes: AthleteSummaryDTO[];
+  subscription_tier?: number | null;
+  athlete_limit?: number | null;
+  athlete_count?: number;
+  over_quota?: boolean;
 }
 
 export interface WeekSessionDTO {
@@ -170,6 +192,9 @@ export interface AthleteDashboardDTO {
   objectives: ObjectiveDTO[];
   last_journal: JournalEntryDTO | null;
   has_logged_today: boolean;
+  pending_invitations?: CoachingInvitationDTO[];
+  coach_id?: number | null;
+  coach_name?: string | null;
 }
 
 export type DashboardDTO = CoachDashboardDTO | AthleteDashboardDTO;
@@ -369,6 +394,33 @@ export interface RemarkDTO {
   exercise: string;
   series_number: number | null;
   notes: string;
+}
+
+export interface JournalFillStatusDTO {
+  entry_date: string;
+  has_steps: boolean;
+  has_sleep_hours: boolean;
+  has_weight: boolean;
+  has_kcals: boolean;
+  has_protein: boolean;
+  has_carbs: boolean;
+  has_fats: boolean;
+}
+
+export interface BulkImportEntryPayload {
+  entry_date: string;
+  steps?: number;
+  sleep_hours?: number;
+  weight?: number;
+  kcals?: number;
+  protein?: number;
+  carbs?: number;
+  fats?: number;
+}
+
+export interface BulkImportResultDTO {
+  imported_days: number;
+  imported_fields: number;
 }
 
 export interface WeeklyBilanEntryDTO {

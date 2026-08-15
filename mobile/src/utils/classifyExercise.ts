@@ -115,10 +115,20 @@ export function classifyExercise(
 
 export function verdictLabel(v: ExerciseVerdict): string {
   switch (v) {
-    case 'progress': return '↑ Progrès';
-    case 'regression': return '↓ Régression';
-    case 'stagnation': return '→ Stagnation';
-    case 'review': return '👀 Vue coach';
+    case 'progress': return 'Progrès';
+    case 'regression': return 'Régression';
+    case 'stagnation': return 'Stagnation';
+    case 'review': return 'Vue coach';
+  }
+}
+
+/** Icône vectorielle associée au verdict, à afficher à côté de verdictLabel(). */
+export function verdictIcon(v: ExerciseVerdict): 'trend-up' | 'trend-down' | 'trend-flat' | 'eye' {
+  switch (v) {
+    case 'progress': return 'trend-up';
+    case 'regression': return 'trend-down';
+    case 'stagnation': return 'trend-flat';
+    case 'review': return 'eye';
   }
 }
 

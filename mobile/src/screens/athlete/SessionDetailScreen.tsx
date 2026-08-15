@@ -4,14 +4,16 @@ import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../context/AuthContext';
 import {
-  addExerciseEntry, deleteExerciseEntry, getProgram,
-  lastPerformanceForExercise, listExerciseBank, listPerformance, listPrograms,
+  addExerciseEntry, deleteExerciseEntry, getProgram, getSession,
+  lastPerformanceForExercises, listExerciseBank, listPerformance,
   updateExerciseEntry,
 } from '../../api/resources';
 import { apiErrorMessage } from '../../api/client';
 import { ExerciseEntryDTO, PerformanceEntryDTO, ProgramSessionDTO } from '../../api/types';
 import { Badge, Button, Card, ErrorView, InlineLoading, Input, LoadingView, ProgressBar, SectionTitle } from '../../components/ui';
+import { Icon } from '../../components/Icon';
 import { colors, fontSize, gradients, muscleColors, radius, shadow, spacing } from '../../theme';
+import { TAB_BAR_CLEARANCE } from '../../navigation/useTabBarStyle';
 import { AthleteStackParamList } from '../../navigation/types';
 import { formatDateFR, isoDaysAgo, shiftLocalISO, todayISO } from '../../utils/format';
 import {
@@ -59,7 +61,7 @@ function mergeDayLogs(
 
 export default function SessionDetailScreen() {
   const { user } = useAuth();
-  const isCoach = user?.role === 'coach';
+  const isCoach = user?.role === 'coach' || user?.role === 'admin';
   const navigation = useNavigation();
   const { params } = useRoute<Route>();
   const athleteId = params.athleteId ?? user?.id ?? 0;
@@ -68,6 +70,7 @@ export default function SessionDetailScreen() {
   const [session, setSession] = useState<ProgramSessionDTO | null>(null);
   const [dayEntries, setDayEntries] = useState<PerformanceEntryDTO[]>([]);
   const [priorDates, setPriorDates] = useState<{ date: string; count: number }[]>([]);
+  const [lastHistoryByEx, setLastHistoryByEx] = useState<Record<string, PerformanceEntryDTO[]>>({});
   const [loading, setLoading] = useState(true);
   const [logsLoading, setLogsLoading] = useState(false);
   const [priorLoading, setPriorLoading] = useState(false);
@@ -183,23 +186,34 @@ export default function SessionDetailScreen() {
     (async () => {
       try {
         setLoading(true);
-        const programs = await listPrograms(athleteId);
         let found: ProgramSessionDTO | null = null;
-        // Priorité : programme actif d'abord (souvent le bon)
-        const ordered = [
-          ...programs.filter((p) => p.is_active),
-          ...programs.filter((p) => !p.is_active),
-        ];
-        for (const p of ordered) {
-          const detailed = await getProgram(p.id);
-          found = detailed.sessions?.find((s) => s.id === params.sessionId) ?? null;
-          if (found) {
-            if (!cancelled) setSession(found);
-            break;
+        try {
+          found = await getSession(params.sessionId);
+        } catch {
+          // Fallback si endpoint pas encore déployé : scan programmes (ancien chemin)
+          const { listPrograms } = await import('../../api/resources');
+          const programs = await listPrograms(athleteId);
+          const ordered = [
+            ...programs.filter((p) => p.is_active),
+            ...programs.filter((p) => !p.is_active),
+          ];
+          for (const p of ordered) {
+            const detailed = await getProgram(p.id);
+            found = detailed.sessions?.find((s) => s.id === params.sessionId) ?? null;
+            if (found) break;
           }
         }
-        if (found) {
+        if (!cancelled && found) {
+          setSession(found);
           void loadPriorDates(found);
+          void lastPerformanceForExercises(
+            athleteId,
+            found.exercises.map((e) => e.name),
+          ).then((map) => {
+            if (!cancelled) setLastHistoryByEx(map);
+          }).catch(() => {
+            if (!cancelled) setLastHistoryByEx({});
+          });
         }
       } catch (err) {
         if (!cancelled) setError(apiErrorMessage(err));
@@ -229,7 +243,7 @@ export default function SessionDetailScreen() {
     return (
       <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
         <Card>
-          <SectionTitle icon="📅">Date du log</SectionTitle>
+          <SectionTitle icon="calendar">Date du log</SectionTitle>
           <Text style={styles.confirmTitle}>{session.session_name}</Text>
           <Text style={styles.confirmHint}>
             Tu peux attaquer n'importe quelle séance. Confirme la date à laquelle tes perfs seront enregistrées.
@@ -265,7 +279,7 @@ export default function SessionDetailScreen() {
               })}
               style={styles.dateShiftBtn}
             >
-              <Text style={styles.dateShiftText}>‹</Text>
+              <Icon name="chevron-left" size={20} color={colors.text} />
             </Pressable>
             <View style={styles.dateCenter}>
               <Text style={styles.dateBig}>{formatDateFR(dateDraft)}</Text>
@@ -283,7 +297,7 @@ export default function SessionDetailScreen() {
               })}
               style={styles.dateShiftBtn}
             >
-              <Text style={styles.dateShiftText}>›</Text>
+              <Icon name="chevron-right" size={20} color={colors.text} />
             </Pressable>
           </View>
 
@@ -345,13 +359,17 @@ export default function SessionDetailScreen() {
           }}
           style={styles.dateBadge}
         >
-          <Text style={styles.dateBadgeText}>📅 {formatDateFR(activeDate)}</Text>
+          <Icon name="calendar" size={14} color={colors.text} />
+          <Text style={styles.dateBadgeText}>{formatDateFR(activeDate)}</Text>
           {needsDateConfirm ? <Text style={styles.dateBadgeChange}>changer</Text> : null}
         </Pressable>
         {doneSeries > 0 ? (
-          <Text style={styles.resumeBanner}>
-            ✓ {doneSeries} série{doneSeries > 1 ? 's' : ''} déjà loguée{doneSeries > 1 ? 's' : ''} le {formatDateFR(activeDate)} — tu peux modifier ou continuer
-          </Text>
+          <View style={styles.resumeBannerRow}>
+            <Icon name="check-circle" size={14} color={colors.success} />
+            <Text style={styles.resumeBanner}>
+              {doneSeries} série{doneSeries > 1 ? 's' : ''} déjà loguée{doneSeries > 1 ? 's' : ''} le {formatDateFR(activeDate)} — tu peux modifier ou continuer
+            </Text>
+          </View>
         ) : null}
         <Text style={styles.subtitle}>
           {session.exercises.length} exercice{session.exercises.length > 1 ? 's' : ''} · {doneSeries}/{totalSeries} séries loggées
@@ -375,6 +393,7 @@ export default function SessionDetailScreen() {
             readOnly={readOnly}
             isCoach={isCoach}
             dayEntries={dayEntries.filter((e) => e.exercise === exercise.name)}
+            prefHistory={lastHistoryByEx[exercise.name]}
             onUpsert={upsertDayEntry}
             onRemove={removeDayEntry}
             onStructureChange={refreshSession}
@@ -407,10 +426,10 @@ function FinishSessionButton({
     // Sync continues in background — don't block leaving the session
     void loadPerfQueue().then(() => flushPerfQueue());
     if (Platform.OS === 'web') {
-      window.alert(`Séance terminée 💪\n\nBravo ! Tu as validé les ${doneSeries} séries de « ${sessionName} ».`);
+      window.alert(`Séance terminée\n\nBravo ! Tu as validé les ${doneSeries} séries de « ${sessionName} ».`);
     } else {
       Alert.alert(
-        'Séance terminée 💪',
+        'Séance terminée',
         `Bravo ! Tu as validé les ${doneSeries} séries de « ${sessionName} ».`,
       );
     }
@@ -444,7 +463,7 @@ function FinishSessionButton({
 
   return (
     <Card style={{ marginTop: spacing.md, marginBottom: spacing.xl }}>
-      <SectionTitle icon="🏁">Fin de séance</SectionTitle>
+      <SectionTitle icon="flag">Fin de séance</SectionTitle>
       <Text style={styles.finishHint}>
         {complete
           ? `Tout est validé (${doneSeries}/${totalSeries}). Tu peux clôturer.`
@@ -496,7 +515,7 @@ function AddExerciseForm({ sessionId, onAdded }: { sessionId: number; onAdded: (
 
   return (
     <Card style={{ marginBottom: spacing.lg }}>
-      <SectionTitle icon="➕">Ajouter un exercice</SectionTitle>
+      <SectionTitle icon="plus">Ajouter un exercice</SectionTitle>
       <Input placeholder="Nom de l'exercice" value={name} onChangeText={setName} />
       {bankLoading ? (
         <InlineLoading label="Suggestions…" style={{ paddingVertical: spacing.sm }} />
@@ -576,17 +595,18 @@ function EditExerciseForm({
 }
 
 function ExerciseCard({
-  exercise, index, athleteId, sessionId, logDate, readOnly, isCoach, dayEntries, onUpsert, onRemove, onStructureChange,
+  exercise, index, athleteId, sessionId, logDate, readOnly, isCoach, dayEntries, prefHistory, onUpsert, onRemove, onStructureChange,
 }: {
   exercise: ExerciseEntryDTO; index: number; athleteId: number; sessionId: number; logDate: string;
   readOnly: boolean; isCoach: boolean;
   dayEntries: PerformanceEntryDTO[];
+  prefHistory?: PerformanceEntryDTO[];
   onUpsert: (entry: PerformanceEntryDTO) => void;
   onRemove: (id: number) => void;
   onStructureChange: () => void;
 }) {
-  const [history, setHistory] = useState<PerformanceEntryDTO[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(true);
+  const [history, setHistory] = useState<PerformanceEntryDTO[]>(prefHistory ?? []);
+  const [historyLoading, setHistoryLoading] = useState(!prefHistory);
   const [values, setValues] = useState<Record<number, { reps: string; load: string; note: string }>>({});
   const [noteOpenFor, setNoteOpenFor] = useState<number | null>(null);
   const [savingSeries, setSavingSeries] = useState<number | null>(null);
@@ -597,37 +617,60 @@ function ExerciseCard({
   const [syncHint, setSyncHint] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!prefHistory) return;
+    setHistory(prefHistory);
+    setHistoryLoading(false);
+    setValues((prev) => {
+      const next = { ...prev };
+      const seriesCount = exercise.series.length || exercise.sets || 3;
+      for (let n = 1; n <= seriesCount; n++) {
+        if (next[n]?.reps || next[n]?.load) continue;
+        const last = prefHistory.find((e) => e.series_number === n) ?? prefHistory[0];
+        if (!last) continue;
+        next[n] = {
+          reps: last.reps != null ? String(last.reps) : '',
+          load: last.load != null ? String(last.load) : '',
+          note: '',
+        };
+      }
+      return next;
+    });
+  }, [prefHistory, exercise.series.length, exercise.sets]);
+
+  useEffect(() => {
+    if (prefHistory) return;
     let cancelled = false;
     setHistoryLoading(true);
-    lastPerformanceForExercise(athleteId, exercise.name)
-      .then((entries) => {
-        if (cancelled) return;
-        setHistory(entries);
-        // Prefill empty series inputs from the most recent matching series
-        setValues((prev) => {
-          const next = { ...prev };
-          const seriesCount = exercise.series.length || exercise.sets || 3;
-          for (let n = 1; n <= seriesCount; n++) {
-            if (next[n]?.reps || next[n]?.load) continue;
-            const last = entries.find((e) => e.series_number === n) ?? entries[0];
-            if (!last) continue;
-            next[n] = {
-              reps: last.reps != null ? String(last.reps) : '',
-              load: last.load != null ? String(last.load) : '',
-              note: '',
-            };
-          }
-          return next;
-        });
-      })
-      .catch(() => {
-        if (!cancelled) setHistory([]);
-      })
-      .finally(() => {
-        if (!cancelled) setHistoryLoading(false);
-      });
+    import('../../api/resources').then(({ lastPerformanceForExercise }) =>
+      lastPerformanceForExercise(athleteId, exercise.name)
+        .then((entries) => {
+          if (cancelled) return;
+          setHistory(entries);
+          setValues((prev) => {
+            const next = { ...prev };
+            const seriesCount = exercise.series.length || exercise.sets || 3;
+            for (let n = 1; n <= seriesCount; n++) {
+              if (next[n]?.reps || next[n]?.load) continue;
+              const last = entries.find((e) => e.series_number === n) ?? entries[0];
+              if (!last) continue;
+              next[n] = {
+                reps: last.reps != null ? String(last.reps) : '',
+                load: last.load != null ? String(last.load) : '',
+                note: '',
+              };
+            }
+            return next;
+          });
+        })
+        .catch(() => {
+          if (!cancelled) setHistory([]);
+        })
+        .finally(() => {
+          if (!cancelled) setHistoryLoading(false);
+        }),
+    );
     return () => { cancelled = true; };
-  }, [athleteId, exercise.name, exercise.series.length, exercise.sets]);
+  }, [athleteId, exercise.name, exercise.series.length, exercise.sets, prefHistory]);
 
   const seriesList = exercise.series.length > 0
     ? exercise.series
@@ -787,15 +830,15 @@ function ExerciseCard({
           onPress={() => setNoteOpenFor((cur) => (cur === sNumber ? null : sNumber))}
           style={styles.noteToggle}
         >
-          <Text style={[styles.noteToggleText, !!current.note && styles.noteToggleActive]}>💬</Text>
+          <Icon name="message" size={17} color={current.note ? colors.primary : colors.textFaint} />
         </Pressable>
         {existing ? (
           <>
             <Pressable onPress={() => handleDeleteDone(existing)} style={styles.deleteDoneBtn}>
-              <Text style={styles.deleteDoneText}>🗑</Text>
+              <Icon name="trash" size={15} color={colors.danger} />
             </Pressable>
             <Pressable onPress={() => setEditingSeries(null)} style={styles.noteToggle}>
-              <Text style={styles.cancelEditText}>↩</Text>
+              <Icon name="undo" size={16} color={colors.textMuted} />
             </Pressable>
           </>
         ) : null}
@@ -805,7 +848,7 @@ function ExerciseCard({
           style={{ opacity: savingSeries === sNumber ? 0.6 : 1 }}
         >
           <LinearGradient colors={gradients.success} style={styles.okButton}>
-            <Text style={styles.okButtonText}>{savingSeries === sNumber ? '…' : '✓'}</Text>
+            {savingSeries === sNumber ? <Text style={styles.okButtonText}>…</Text> : <Icon name="check" size={18} color="#08240F" />}
           </LinearGradient>
         </Pressable>
       </View>
@@ -822,18 +865,21 @@ function ExerciseCard({
           <Text style={styles.exerciseName}>{exercise.name}</Text>
           <View style={styles.chipRow}>
             {exercise.muscle ? <Badge label={exercise.muscle} color={muscleColors[exercise.muscle] ?? colors.primary} /> : null}
-            {isComplete && <Badge label="✓ FAIT" color={colors.success} />}
+            {isComplete && <Badge label="FAIT" color={colors.success} />}
           </View>
         </View>
         {isCoach && (
           <View style={{ flexDirection: 'row' }}>
-            <Button title="✎" variant="ghost" onPress={() => setEditing((e) => !e)} style={styles.deleteExerciseBtn} />
-            <Button
-              title="✕"
-              variant="ghost"
+            <Pressable onPress={() => setEditing((e) => !e)} style={styles.deleteExerciseBtn} hitSlop={6}>
+              <Icon name="edit" size={17} color={colors.textMuted} />
+            </Pressable>
+            <Pressable
               onPress={async () => { await deleteExerciseEntry(exercise.id); onStructureChange(); }}
               style={styles.deleteExerciseBtn}
-            />
+              hitSlop={6}
+            >
+              <Icon name="close" size={18} color={colors.danger} />
+            </Pressable>
           </View>
         )}
       </View>
@@ -849,7 +895,12 @@ function ExerciseCard({
             {exercise.sets ?? seriesList.length} séries · {exercise.reps ?? '-'} reps · repos {exercise.rest ?? '-'}
             {exercise.rir ? ` · RIR ${exercise.rir}` : ''}
           </Text>
-          {exercise.remark ? <Text style={styles.remark}>💬 {exercise.remark}</Text> : null}
+          {exercise.remark ? (
+            <View style={styles.remarkRow}>
+              <Icon name="message" size={13} color={colors.warning} />
+              <Text style={styles.remark}>{exercise.remark}</Text>
+            </View>
+          ) : null}
         </>
       )}
 
@@ -860,7 +911,10 @@ function ExerciseCard({
         </View>
       ) : !readOnly && historyGroups.length > 0 ? (
         <View style={styles.historyBox}>
-          <Text style={styles.historyTitle}>📈 Historique (surcharge)</Text>
+          <View style={styles.historyTitleRow}>
+            <Icon name="trend-up" size={13} color={colors.gold} />
+            <Text style={styles.historyTitle}>Historique (surcharge)</Text>
+          </View>
           {historyGroups.map((g) => (
             <Text key={g.date} style={styles.historyLine} numberOfLines={2}>
               <Text style={styles.historyDate}>{formatDateFR(g.date)} · </Text>
@@ -904,13 +958,18 @@ function ExerciseCard({
                   renderSeriesInputs(s.number, isEditingDone ? done : null)
                 ) : done ? (
                   <View style={styles.doneRow}>
-                    {isPR ? <Text style={styles.prBadge}>🏆 PR</Text> : null}
+                    {isPR ? (
+                      <View style={styles.prBadgeRow}>
+                        <Icon name="trophy" size={13} color={colors.gold} />
+                        <Text style={styles.prBadge}>PR</Text>
+                      </View>
+                    ) : null}
                     <Text style={styles.doneText}>{done.reps}×{done.load}kg</Text>
                     <Pressable onPress={() => startEditDone(done)} style={styles.editDoneBtn}>
-                      <Text style={styles.editDoneText}>✎</Text>
+                      <Icon name="edit" size={14} color={colors.textMuted} />
                     </Pressable>
                     <Pressable onPress={() => handleDeleteDone(done)} style={styles.deleteDoneBtn}>
-                      <Text style={styles.deleteDoneText}>✕</Text>
+                      <Icon name="close" size={14} color={colors.danger} />
                     </Pressable>
                   </View>
                 ) : null}
@@ -926,7 +985,12 @@ function ExerciseCard({
                   style={styles.noteInput}
                 />
               )}
-              {done?.notes && !isEditingDone ? <Text style={styles.doneNote}>💬 {done.notes}</Text> : null}
+              {done?.notes && !isEditingDone ? (
+                <View style={styles.doneNoteRow}>
+                  <Icon name="message" size={11} color={colors.warning} />
+                  <Text style={styles.doneNote}>{done.notes}</Text>
+                </View>
+              ) : null}
             </View>
           );
         })}
@@ -937,7 +1001,7 @@ function ExerciseCard({
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.lg, paddingBottom: spacing.xxl },
+  content: { padding: spacing.lg, paddingBottom: spacing.xxl + TAB_BAR_CLEARANCE },
   header: { marginBottom: spacing.lg },
   title: { color: colors.text, fontSize: fontSize.xxl, fontWeight: '900' },
   subtitle: { color: colors.textMuted, fontSize: fontSize.sm, fontWeight: '600', marginTop: spacing.xs, marginBottom: spacing.md },
@@ -960,8 +1024,11 @@ const styles = StyleSheet.create({
   },
   priorHint: { color: colors.success, fontSize: fontSize.xs, fontWeight: '700', marginTop: spacing.xs },
   priorHintMuted: { color: colors.textFaint, fontSize: fontSize.xs, fontWeight: '600', marginTop: spacing.xs },
+  resumeBannerRow: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: spacing.sm,
+  },
   resumeBanner: {
-    color: colors.success, fontSize: fontSize.sm, fontWeight: '700', marginTop: spacing.sm,
+    flex: 1, color: colors.success, fontSize: fontSize.sm, fontWeight: '700',
     lineHeight: 20,
   },
   datePickerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md },
@@ -969,7 +1036,6 @@ const styles = StyleSheet.create({
     width: 48, height: 48, borderRadius: radius.md, backgroundColor: colors.surfaceHi,
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border,
   },
-  dateShiftText: { color: colors.text, fontSize: 28, fontWeight: '700', marginTop: -2 },
   dateCenter: { alignItems: 'center', flex: 1 },
   dateBig: { color: colors.text, fontSize: fontSize.lg, fontWeight: '900', textTransform: 'capitalize' },
   dateIso: { color: colors.textFaint, fontSize: fontSize.xs, marginTop: 2, fontWeight: '600' },
@@ -991,13 +1057,15 @@ const styles = StyleSheet.create({
   exerciseName: { color: colors.text, fontSize: fontSize.md, fontWeight: '800' },
   chipRow: { flexDirection: 'row', gap: spacing.xs, marginTop: spacing.xs, flexWrap: 'wrap' },
   exerciseMeta: { color: colors.textMuted, fontSize: fontSize.sm, marginTop: spacing.sm, fontWeight: '600' },
-  remark: { color: colors.warning, fontSize: fontSize.sm, marginTop: spacing.xs },
+  remarkRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 4, marginTop: spacing.xs },
+  remark: { flex: 1, color: colors.warning, fontSize: fontSize.sm },
   historyBox: {
     marginTop: spacing.md, backgroundColor: colors.backgroundAlt, borderRadius: radius.md,
     padding: spacing.md, borderWidth: 1, borderColor: colors.border,
   },
   historyLoadingRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  historyTitle: { color: colors.gold, fontWeight: '800', fontSize: fontSize.xs, marginBottom: spacing.sm, letterSpacing: 0.5 },
+  historyTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: spacing.sm },
+  historyTitle: { color: colors.gold, fontWeight: '800', fontSize: fontSize.xs, letterSpacing: 0.5 },
   historyLine: { color: colors.textMuted, fontSize: fontSize.xs, marginBottom: 4, lineHeight: 16 },
   historyDate: { color: colors.text, fontWeight: '700' },
   saveError: { color: colors.danger, fontSize: fontSize.sm, fontWeight: '700', marginTop: spacing.sm },
@@ -1015,20 +1083,18 @@ const styles = StyleSheet.create({
   seriesDesc: { color: colors.textMuted, fontSize: fontSize.sm },
   lastHint: { color: colors.textFaint, fontSize: 11, marginTop: 2, fontWeight: '600' },
   doneRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  prBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   prBadge: { color: colors.gold, fontWeight: '800', fontSize: fontSize.xs },
   doneText: { color: colors.success, fontWeight: '800', fontSize: fontSize.sm },
   editDoneBtn: {
     marginLeft: spacing.xs, paddingHorizontal: 8, paddingVertical: 4,
     backgroundColor: colors.surfaceHi, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border,
   },
-  editDoneText: { color: colors.textMuted, fontWeight: '800', fontSize: fontSize.sm },
   deleteDoneBtn: {
     marginLeft: 2, paddingHorizontal: 8, paddingVertical: 4,
     backgroundColor: 'rgba(220, 38, 38, 0.12)', borderRadius: radius.sm,
     borderWidth: 1, borderColor: colors.danger,
   },
-  deleteDoneText: { color: colors.danger, fontWeight: '800', fontSize: fontSize.sm },
-  cancelEditText: { color: colors.textMuted, fontSize: 16, fontWeight: '700' },
   finishHint: { color: colors.textMuted, fontSize: fontSize.sm, fontWeight: '600', lineHeight: 20 },
   inputsRow: { flexDirection: 'row', gap: spacing.xs, alignItems: 'center' },
   smallInput: {
@@ -1040,11 +1106,13 @@ const styles = StyleSheet.create({
   },
   okButtonText: { color: '#08240F', fontWeight: '900', fontSize: fontSize.md },
   noteToggle: { paddingHorizontal: 4, paddingVertical: 4 },
-  noteToggleText: { fontSize: 16, opacity: 0.4 },
-  noteToggleActive: { opacity: 1 },
   noteInput: { marginTop: -spacing.xs, marginBottom: spacing.sm },
-  doneNote: { color: colors.warning, fontSize: fontSize.xs, marginTop: -spacing.xs, marginBottom: spacing.sm, marginLeft: 36 },
-  deleteExerciseBtn: { paddingVertical: 2, paddingHorizontal: spacing.xs, marginLeft: spacing.xs },
+  doneNoteRow: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 4,
+    marginTop: -spacing.xs, marginBottom: spacing.sm, marginLeft: 36,
+  },
+  doneNote: { flex: 1, color: colors.warning, fontSize: fontSize.xs },
+  deleteExerciseBtn: { paddingVertical: 4, paddingHorizontal: spacing.sm, marginLeft: spacing.xs },
   suggestionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.sm },
   formRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
   formInput: { flex: 1 },

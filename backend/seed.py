@@ -56,16 +56,39 @@ def run():
         db.drop_all()
         db.create_all()
 
-        coach = User(username='coach', role='coach', display_name='Coach Dru')
+        from datetime import datetime as dt
+
+        coach = User(username='coach', role='coach', display_name='Coach Dru', subscription_tier=3, email='coach@dru.local')
         coach.set_password('coach123')
 
-        athlete = User(username='athlete', role='athlete', display_name='Alex Athlète')
+        superadmin = User(username='Superadmin', role='admin', display_name='Superadmin', subscription_tier=0)
+        superadmin.set_password('14785commePAUL!')
+
+        athlete = User(
+            username='athlete@dru.local', email='athlete@dru.local',
+            role='athlete', display_name='Alex Athlète',
+        )
         athlete.set_password('athlete123')
 
-        athlete2 = User(username='athlete2', role='athlete', display_name='Sam Athlète')
+        athlete2 = User(
+            username='athlete2@dru.local', email='athlete2@dru.local',
+            role='athlete', display_name='Sam Athlète',
+        )
         athlete2.set_password('athlete123')
 
-        db.session.add_all([coach, athlete, athlete2])
+        paul = User(
+            username='paul.gilliard.8@gmail.com', email='paul.gilliard.8@gmail.com',
+            role='athlete', display_name='Paul',
+        )
+        paul.set_password('athlete123')
+
+        db.session.add_all([coach, superadmin, athlete, athlete2, paul])
+        db.session.commit()
+
+        athlete.coach_id = coach.id
+        athlete.coach_associated_at = dt.utcnow()
+        athlete2.coach_id = coach.id
+        athlete2.coach_associated_at = dt.utcnow()
         db.session.commit()
 
         exercises_bank = []

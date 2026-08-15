@@ -4,41 +4,51 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
 import { useAthleteScope } from '../../context/AthleteScopeContext';
 import {
-  addMealEntry, createMealPlan, deleteMealEntry, deleteMealPlan, duplicateMealPlan, getMealPlan,
-  listFoods, listMealPlans, renameMealPlan, setMealTime,
+  activateMealPlan, addMealEntry, createMealPlan, deleteMealEntry, deleteMealPlan, duplicateMealPlan,
+  listFoods, listMealPlans, renameMealPlan, setMealTime, TTL,
 } from '../../api/resources';
 import { apiErrorMessage } from '../../api/client';
 import { FoodDTO, MealPlanDTO } from '../../api/types';
 import { Badge, Button, Card, EmptyState, ErrorView, Input, LoadingView, SectionTitle } from '../../components/ui';
+import { Icon } from '../../components/Icon';
 import { colors, fontSize, spacing } from '../../theme';
+import { TAB_BAR_CLEARANCE } from '../../navigation/useTabBarStyle';
+import { cacheGetSync, cachePeekSync } from '../../utils/apiCache';
 
 export default function NutritionScreen() {
   const { user } = useAuth();
-  const { athleteId } = useAthleteScope();
-  const isCoach = user?.role === 'coach';
+  const { athleteId, readOnly } = useAthleteScope();
+  const isCoach = user?.role === 'coach' || user?.role === 'admin';
 
-  const [plans, setPlans] = useState<MealPlanDTO[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cacheKey = `mealPlans:${athleteId}:1`;
+  const cached = cacheGetSync<MealPlanDTO[]>(cacheKey, TTL.mealPlans)
+    ?? cachePeekSync<MealPlanDTO[]>(cacheKey)?.data
+    ?? null;
+  const [plans, setPlans] = useState<MealPlanDTO[]>(cached ?? []);
+  const [loading, setLoading] = useState(!cached);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newPlanName, setNewPlanName] = useState('');
   const [creating, setCreating] = useState(false);
+  const hasDataRef = React.useRef(!!cached?.length);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
+    if (!hasDataRef.current) setLoading(true);
+    else if (force) setRefreshing(true);
     try {
       setError(null);
-      const list = await listMealPlans(athleteId);
-      const detailed = await Promise.all(list.map((p) => getMealPlan(p.id)));
-      setPlans(detailed);
+      const list = await listMealPlans(athleteId, { withMeals: true });
+      hasDataRef.current = true;
+      setPlans(list);
     } catch (err) {
-      setError(apiErrorMessage(err));
+      if (!hasDataRef.current) setError(apiErrorMessage(err));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, [athleteId]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(useCallback(() => { void load(false); }, [load]));
 
   const handleCreatePlan = async () => {
     if (!newPlanName.trim()) return;
@@ -46,7 +56,7 @@ export default function NutritionScreen() {
     try {
       await createMealPlan({ name: newPlanName.trim(), athlete_id: athleteId });
       setNewPlanName('');
-      await load();
+      await load(true);
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {
@@ -57,24 +67,24 @@ export default function NutritionScreen() {
   const handleDeletePlan = async (planId: number) => {
     try {
       await deleteMealPlan(planId);
-      await load();
+      await load(true);
     } catch (err) {
       setError(apiErrorMessage(err));
     }
   };
 
-  if (loading) return <LoadingView label="Chargement du plan alimentaire..." />;
-  if (error) return <ErrorView message={error} onRetry={load} />;
+  if (loading && !plans.length) return <LoadingView label="Chargement du plan alimentaire..." />;
+  if (error && !plans.length) return <ErrorView message={error} onRetry={() => void load(true)} />;
 
   return (
     <ScrollView
       style={styles.screen}
       contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { void load(true); }} tintColor={colors.primary} />}
     >
       {isCoach && (
         <Card style={{ marginBottom: spacing.lg }}>
-          <SectionTitle icon="🍽️">Nouveau plan alimentaire</SectionTitle>
+          <SectionTitle icon="nutrition">Nouveau plan alimentaire</SectionTitle>
           <View style={styles.row}>
             <Input style={{ flex: 1 }} placeholder="Nom du plan" value={newPlanName} onChangeText={setNewPlanName} />
             <Button title="Créer" onPress={handleCreatePlan} loading={creating} disabled={!newPlanName.trim()} style={styles.createBtn} />
@@ -83,10 +93,17 @@ export default function NutritionScreen() {
       )}
 
       {plans.length === 0 ? (
-        <EmptyState icon="🍽️" title="Aucun plan alimentaire" subtitle={isCoach ? 'Crée un plan ci-dessus.' : "Ton coach n'a pas encore créé de plan."} />
+        <EmptyState icon="nutrition" title="Aucun plan alimentaire" subtitle={isCoach ? 'Crée un plan ci-dessus.' : "Ton coach n'a pas encore créé de plan."} />
       ) : (
         plans.map((plan) => (
-          <MealPlanCard key={plan.id} plan={plan} isCoach={isCoach} onChanged={load} onDeletePlan={() => handleDeletePlan(plan.id)} />
+          <MealPlanCard
+            key={plan.id}
+            plan={plan}
+            isCoach={isCoach}
+            readOnly={readOnly}
+            onChanged={load}
+            onDeletePlan={() => handleDeletePlan(plan.id)}
+          />
         ))
       )}
     </ScrollView>
@@ -94,14 +111,16 @@ export default function NutritionScreen() {
 }
 
 function MealPlanCard({
-  plan, isCoach, onChanged, onDeletePlan,
-}: { plan: MealPlanDTO; isCoach: boolean; onChanged: () => void; onDeletePlan: () => void }) {
+  plan, isCoach, readOnly, onChanged, onDeletePlan,
+}: { plan: MealPlanDTO; isCoach: boolean; readOnly: boolean; onChanged: () => void; onDeletePlan: () => void }) {
   const totals = plan.totals;
+  const isActive = !!plan.is_active;
   const [addingToMeal, setAddingToMeal] = useState<number | null>(null);
   const [editingMealTime, setEditingMealTime] = useState<number | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState(plan.name);
   const [busy, setBusy] = useState(false);
+  const [activating, setActivating] = useState(false);
 
   const handleRename = async () => {
     if (!nameDraft.trim() || nameDraft.trim() === plan.name) { setRenaming(false); return; }
@@ -125,14 +144,27 @@ function MealPlanCard({
     }
   };
 
+  const handleActivate = async () => {
+    if (isActive) return;
+    setActivating(true);
+    try {
+      await activateMealPlan(plan.id);
+      onChanged();
+    } finally {
+      setActivating(false);
+    }
+  };
+
   return (
-    <Card style={{ marginBottom: spacing.lg }}>
+    <Card style={[{ marginBottom: spacing.lg }, isActive && styles.activeCard]}>
       <View style={styles.cardHeader}>
         {renaming ? (
           <Input style={{ flex: 1 }} value={nameDraft} onChangeText={setNameDraft} autoFocus onSubmitEditing={handleRename} />
         ) : (
-          <Pressable style={{ flex: 1 }} onPress={() => isCoach && setRenaming(true)} disabled={!isCoach}>
-            <SectionTitle style={{ marginBottom: 0 }} icon="🍽️">{plan.name}{isCoach ? ' ✎' : ''}</SectionTitle>
+          <Pressable style={styles.planTitleRow} onPress={() => isCoach && setRenaming(true)} disabled={!isCoach}>
+            <SectionTitle style={{ marginBottom: 0, flexShrink: 1 }} icon="nutrition">{plan.name}</SectionTitle>
+            {isActive ? <Badge label="ACTIF" color={colors.success} /> : null}
+            {isCoach ? <Icon name="edit" size={13} color={colors.textFaint} /> : null}
           </Pressable>
         )}
         {isCoach && !renaming && (
@@ -143,6 +175,17 @@ function MealPlanCard({
         )}
         {renaming && <Button title="OK" onPress={handleRename} loading={busy} style={styles.smallBtn} />}
       </View>
+
+      {(!readOnly || isCoach) && !isActive ? (
+        <Button
+          title="Définir comme actif"
+          variant="secondary"
+          onPress={handleActivate}
+          loading={activating}
+          style={{ marginBottom: spacing.md }}
+        />
+      ) : null}
+
       <View style={styles.kcalHero}>
         <Text style={styles.kcalValue}>{Math.round(totals.kcals)}</Text>
         <Text style={styles.kcalUnit}>kcal / jour</Text>
@@ -162,8 +205,9 @@ function MealPlanCard({
             <View style={styles.mealTitleRow}>
               <Text style={styles.mealTitle}>{label}{time ? ` · ${time}` : ''}</Text>
               {isCoach && (
-                <Pressable onPress={() => setEditingMealTime(editingMealTime === mealNumber ? null : mealNumber)}>
-                  <Text style={styles.editMealLink}>🕐 Modifier</Text>
+                <Pressable onPress={() => setEditingMealTime(editingMealTime === mealNumber ? null : mealNumber)} style={styles.editMealLinkRow}>
+                  <Icon name="clock" size={12} color={colors.primary} />
+                  <Text style={styles.editMealLink}>Modifier</Text>
                 </Pressable>
               )}
             </View>
@@ -181,7 +225,9 @@ function MealPlanCard({
                 <Text style={styles.foodName}>{m.food_name}</Text>
                 <Text style={styles.foodQty}>{m.quantity}g · {Math.round(m.kcals)}kcal</Text>
                 {isCoach && (
-                  <Button title="✕" variant="ghost" onPress={async () => { await deleteMealEntry(m.id); onChanged(); }} style={styles.deleteFoodBtn} />
+                  <Pressable onPress={async () => { await deleteMealEntry(m.id); onChanged(); }} style={styles.deleteFoodBtn} hitSlop={6}>
+                    <Icon name="close" size={15} color={colors.danger} />
+                  </Pressable>
                 )}
               </View>
             ))}
@@ -290,13 +336,16 @@ function TotalPill({ label, value, color, unit }: { label: string; value: number
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.lg, paddingBottom: spacing.xxl },
+  content: { padding: spacing.lg, paddingBottom: spacing.xxl + TAB_BAR_CLEARANCE },
   row: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center' },
   createBtn: { paddingHorizontal: spacing.lg },
+  activeCard: { borderColor: colors.success, borderWidth: 1.5 },
   cardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.xs, gap: spacing.xs },
+  planTitleRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   headerActions: { flexDirection: 'row', gap: spacing.xs },
   smallBtn: { paddingVertical: spacing.xs, paddingHorizontal: spacing.sm },
   mealTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  editMealLinkRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   editMealLink: { color: colors.primary, fontSize: fontSize.xs, fontWeight: '700' },
   timeEditor: { flexDirection: 'row', gap: spacing.xs, alignItems: 'center', marginBottom: spacing.sm },
   timeInput: { width: 80, paddingVertical: spacing.xs, textAlign: 'center' },

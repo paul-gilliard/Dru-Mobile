@@ -28,7 +28,7 @@ export default function RemarksList({ athleteId, limit = 15 }: { athleteId: numb
 
   return (
     <Card style={{ marginBottom: spacing.lg }}>
-      <SectionTitle icon="💬">Remarques de l'athlète</SectionTitle>
+      <SectionTitle icon="message">Remarques de l'athlète</SectionTitle>
       {remarks.map((r, i) => (
         <View key={`${r.date}-${r.exercise}-${i}`} style={styles.row}>
           <View style={styles.rowHead}>

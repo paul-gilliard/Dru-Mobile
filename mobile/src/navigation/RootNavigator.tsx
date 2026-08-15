@@ -32,7 +32,7 @@ export default function RootNavigator() {
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {!user ? (
           <Stack.Screen name="Login" component={LoginScreen} />
-        ) : user.role === 'coach' ? (
+        ) : user.role === 'coach' || user.role === 'admin' ? (
           <Stack.Screen name="CoachApp" component={CoachNavigator} />
         ) : (
           <Stack.Screen name="AthleteApp" component={AthleteNavigator} />

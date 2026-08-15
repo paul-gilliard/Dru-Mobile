@@ -3,18 +3,22 @@ import { Alert, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleShe
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 import { useAuth } from '../../context/AuthContext';
 import { useAthleteScope } from '../../context/AthleteScopeContext';
 import {
   activateProgram, createProgram, createSession, deleteProgram, deleteSession, duplicateProgram, getProgram,
-  listAthletes, listPrograms, renameProgram, renameSession,
+  listAthletes, listPrograms, renameProgram, renameSession, TTL,
 } from '../../api/resources';
 import { apiErrorMessage } from '../../api/client';
 import { ProgramDTO, UserDTO } from '../../api/types';
 import { Badge, Button, Card, EmptyState, ErrorView, InlineLoading, Input, LoadingView, SectionTitle } from '../../components/ui';
+import { Icon } from '../../components/Icon';
 import { colors, fontSize, gradients, muscleColors, radius, spacing } from '../../theme';
+import { TAB_BAR_CLEARANCE } from '../../navigation/useTabBarStyle';
 import { AthleteStackParamList } from '../../navigation/types';
 import { DAY_NAMES, DAY_NAMES_SHORT, jsWeekdayToBackend } from '../../utils/format';
+import { cacheGetSync, cachePeekSync } from '../../utils/apiCache';
 
 type Nav = NativeStackNavigationProp<AthleteStackParamList, 'Program'>;
 
@@ -24,29 +28,37 @@ export default function ProgramScreen() {
   const navigation = useNavigation<Nav>();
   const { user } = useAuth();
   const { athleteId, readOnly } = useAthleteScope();
-  const isCoach = user?.role === 'coach';
+  const isCoach = user?.role === 'coach' || user?.role === 'admin';
 
-  const [programs, setPrograms] = useState<ProgramDTO[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cacheKey = `programs:${athleteId}`;
+  const cached = cacheGetSync<ProgramDTO[]>(cacheKey, TTL.programs)
+    ?? cachePeekSync<ProgramDTO[]>(cacheKey)?.data
+    ?? null;
+  const [programs, setPrograms] = useState<ProgramDTO[]>(cached ?? []);
+  const [loading, setLoading] = useState(!cached);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newProgramName, setNewProgramName] = useState('');
   const [creating, setCreating] = useState(false);
+  const hasDataRef = React.useRef(!!cached?.length);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
+    if (!hasDataRef.current) setLoading(true);
+    else if (force) setRefreshing(true);
     try {
       setError(null);
       const data = await listPrograms(athleteId);
+      hasDataRef.current = true;
       setPrograms(data);
     } catch (err) {
-      setError(apiErrorMessage(err));
+      if (!hasDataRef.current) setError(apiErrorMessage(err));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, [athleteId]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(useCallback(() => { void load(false); }, [load]));
 
   const handleCreateProgram = async () => {
     if (!newProgramName.trim()) return;
@@ -54,7 +66,7 @@ export default function ProgramScreen() {
     try {
       await createProgram({ name: newProgramName.trim(), athlete_id: athleteId });
       setNewProgramName('');
-      await load();
+      await load(true);
     } catch (err) {
       setError(apiErrorMessage(err));
     } finally {
@@ -65,7 +77,7 @@ export default function ProgramScreen() {
   const runDeleteProgram = async (programId: number) => {
     try {
       await deleteProgram(programId);
-      await load();
+      await load(true);
     } catch (err) {
       Alert.alert('Suppression impossible', apiErrorMessage(err));
     }
@@ -88,24 +100,24 @@ export default function ProgramScreen() {
   const handleActivateProgram = async (programId: number) => {
     try {
       await activateProgram(programId);
-      await load();
+      await load(true);
     } catch (err) {
       setError(apiErrorMessage(err));
     }
   };
 
-  if (loading) return <LoadingView label="Chargement du programme..." />;
-  if (error) return <ErrorView message={error} onRetry={load} />;
+  if (loading && !programs.length) return <LoadingView label="Chargement du programme..." />;
+  if (error && !programs.length) return <ErrorView message={error} onRetry={() => void load(true)} />;
 
   return (
     <ScrollView
       style={styles.screen}
       contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { void load(true); }} tintColor={colors.primary} />}
     >
       {isCoach && (
         <Card style={{ marginBottom: spacing.lg }}>
-          <SectionTitle icon="➕">Nouveau programme</SectionTitle>
+          <SectionTitle icon="plus">Nouveau programme</SectionTitle>
           <View style={styles.row}>
             <Input
               style={{ flex: 1 }}
@@ -125,7 +137,7 @@ export default function ProgramScreen() {
       ) : null}
 
       {programs.length === 0 ? (
-        <EmptyState icon="🏋️" title="Aucun programme assigné" subtitle={isCoach ? 'Crée un programme ci-dessus.' : "Ton coach n'a pas encore créé de programme."} />
+        <EmptyState icon="program" title="Aucun programme assigné" subtitle={isCoach ? 'Crée un programme ci-dessus.' : "Ton coach n'a pas encore créé de programme."} />
       ) : (
         programs.map((program, index) => {
           const anyActive = programs.some((p) => p.is_active);
@@ -274,13 +286,13 @@ function ProgramCard({
           onPress={() => setExpanded((v) => !v)}
           style={styles.cardHeaderMain}
         >
-          <Text style={styles.chevronToggle}>{expanded ? '▼' : '▶'}</Text>
+          <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={16} color={colors.textMuted} />
           {renaming ? (
             <Input style={{ flex: 1 }} value={nameDraft} onChangeText={setNameDraft} autoFocus onSubmitEditing={handleRenameProgram} />
           ) : (
             <View style={{ flex: 1 }}>
               <View style={styles.titleRow}>
-                <SectionTitle style={{ marginBottom: 0 }} icon="🏋️">{full.name}</SectionTitle>
+                <SectionTitle style={{ marginBottom: 0 }} icon="program">{full.name}</SectionTitle>
                 {isActive ? <Badge label="ACTUELLE" color={colors.success} /> : null}
               </View>
               <Text style={styles.collapsedMeta}>
@@ -307,7 +319,7 @@ function ProgramCard({
 
       {(!readOnly || isCoach) && !isActive ? (
         <Button
-          title="★ Définir comme actuelle"
+          title="Définir comme actuelle"
           variant="secondary"
           onPress={handleActivate}
           loading={activating}
@@ -316,8 +328,9 @@ function ProgramCard({
       ) : null}
 
       {isCoach && !renaming ? (
-        <Pressable onPress={() => setRenaming(true)} style={{ marginBottom: expanded ? spacing.sm : 0 }}>
-          <Text style={styles.renameHint}>✎ Renommer le programme</Text>
+        <Pressable onPress={() => setRenaming(true)} style={[styles.renameHintRow, { marginBottom: expanded ? spacing.sm : 0 }]}>
+          <Icon name="edit" size={12} color={colors.secondary} />
+          <Text style={styles.renameHint}>Renommer le programme</Text>
         </Pressable>
       ) : null}
 
@@ -385,10 +398,10 @@ function ProgramCard({
                     ) : (
                       <View style={styles.sessionActions}>
                         <Pressable onPress={() => { setSessionNameDraft(session.session_name ?? ''); setEditingSessionId(session.id); }}>
-                          <Text style={styles.sessionActionIcon}>✎</Text>
+                          <Icon name="edit" size={16} color={colors.textMuted} />
                         </Pressable>
                         <Pressable onPress={() => handleDeleteSession(session.id)}>
-                          <Text style={styles.sessionActionIcon}>🗑️</Text>
+                          <Icon name="trash" size={16} color={colors.danger} />
                         </Pressable>
                       </View>
                     )
@@ -398,13 +411,13 @@ function ProgramCard({
                         colors={isToday ? gradients.primary : [colors.surfaceHi, colors.surfaceHi]}
                         style={styles.startBtn}
                       >
-                        <Text style={[styles.startBtnText, !isToday && { color: colors.text }]}>
-                          {isToday ? '🔥 Attaquer' : 'Attaquer ›'}
-                        </Text>
+                        {isToday ? <Icon name="flame" size={13} color={colors.textOnAccent} /> : null}
+                        <Text style={[styles.startBtnText, !isToday && { color: colors.text }]}>Attaquer</Text>
+                        <Icon name="chevron-right" size={13} color={isToday ? colors.textOnAccent : colors.text} />
                       </LinearGradient>
                     </Pressable>
                   ) : (
-                    <Text style={styles.chevron}>›</Text>
+                    <Icon name="chevron-right" size={18} color={colors.textFaint} />
                   )}
                 </View>
               );
@@ -501,7 +514,7 @@ function DuplicateProgramModal({
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.modalOverlay}>
+      <BlurView intensity={35} tint="dark" style={styles.modalOverlay}>
         <View style={styles.modalCard}>
           <Text style={styles.modalTitle}>Dupliquer le programme</Text>
           <Text style={styles.dupHint}>Choisis le nom et l’athlète de destination.</Text>
@@ -530,7 +543,7 @@ function DuplicateProgramModal({
                     <Text style={[styles.athleteName, selected && styles.athleteNameOn]}>
                       {a.display_name || a.username}
                     </Text>
-                    <Text style={styles.athleteCheck}>{selected ? '✓' : ''}</Text>
+                    {selected ? <Icon name="check" size={16} color={colors.primary} /> : null}
                   </Pressable>
                 );
               })}
@@ -553,7 +566,7 @@ function DuplicateProgramModal({
             />
           </View>
         </View>
-      </View>
+      </BlurView>
     </Modal>
   );
 }
@@ -563,10 +576,13 @@ function RecapModal({
 }: { visible: boolean; onClose: () => void; programName: string; sessions: import('../../api/types').ProgramSessionDTO[] }) {
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.modalOverlay}>
+      <BlurView intensity={35} tint="dark" style={styles.modalOverlay}>
         <View style={styles.modalCard}>
           <ScrollView>
-            <Text style={styles.modalTitle}>📋 Récapitulatif — {programName}</Text>
+            <View style={styles.modalTitleRow}>
+              <Icon name="clipboard" size={18} color={colors.text} />
+              <Text style={styles.modalTitle}>Récapitulatif — {programName}</Text>
+            </View>
             {sessions.length === 0 ? (
               <Text style={styles.mutedText}>Aucune séance.</Text>
             ) : (
@@ -588,14 +604,14 @@ function RecapModal({
           </ScrollView>
           <Button title="Fermer" onPress={onClose} style={{ marginTop: spacing.md }} />
         </View>
-      </View>
+      </BlurView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.lg, paddingBottom: spacing.xxl },
+  content: { padding: spacing.lg, paddingBottom: spacing.xxl + TAB_BAR_CLEARANCE },
   hintText: {
     color: colors.textMuted, fontSize: fontSize.sm, fontWeight: '600',
     marginBottom: spacing.md, lineHeight: 20,
@@ -608,6 +624,7 @@ const styles = StyleSheet.create({
   chevronToggle: { color: colors.textMuted, fontSize: 12, fontWeight: '900', width: 16 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },
   collapsedMeta: { color: colors.textFaint, fontSize: fontSize.xs, fontWeight: '600', marginTop: 2 },
+  renameHintRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   renameHint: { color: colors.textMuted, fontSize: fontSize.xs, fontWeight: '700' },
   headerActions: { flexDirection: 'row', gap: spacing.xs, flexShrink: 0 },
   smallBtn: { paddingVertical: spacing.xs, paddingHorizontal: spacing.sm },
@@ -627,7 +644,10 @@ const styles = StyleSheet.create({
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   chevron: { color: colors.textFaint, fontSize: 24 },
   startBtnWrap: { marginLeft: spacing.xs },
-  startBtn: { paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radius.pill },
+  startBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radius.pill,
+  },
   startBtnText: { color: '#fff', fontWeight: '800', fontSize: fontSize.xs },
   mutedText: { color: colors.textMuted },
   emptySession: { color: colors.textFaint, fontSize: fontSize.xs, fontStyle: 'italic' },
@@ -645,11 +665,13 @@ const styles = StyleSheet.create({
   },
   statPillValue: { color: colors.primary, fontWeight: '900', fontSize: fontSize.lg },
   statPillLabel: { color: colors.textMuted, fontSize: fontSize.xs, fontWeight: '700', marginTop: 2, textTransform: 'uppercase' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: spacing.lg },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(5,6,8,0.35)', justifyContent: 'center', padding: spacing.lg },
   modalCard: {
     backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg, maxHeight: '80%', borderWidth: 1, borderColor: colors.border,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.5, shadowRadius: 24, elevation: 12,
   },
-  modalTitle: { color: colors.text, fontSize: fontSize.lg, fontWeight: '900', marginBottom: spacing.md },
+  modalTitleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.md },
+  modalTitle: { color: colors.text, fontSize: fontSize.lg, fontWeight: '900' },
   modalDay: { color: colors.primary, fontWeight: '800', fontSize: fontSize.sm, marginBottom: spacing.xs, textTransform: 'uppercase' },
   modalEmptyDay: { color: colors.textFaint, fontSize: fontSize.xs, fontStyle: 'italic' },
   modalExerciseLine: { color: colors.textMuted, fontSize: fontSize.sm, marginBottom: 2 },

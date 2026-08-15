@@ -6,14 +6,16 @@ import { listAvailability, setAvailability } from '../../api/resources';
 import { apiErrorMessage } from '../../api/client';
 import { AvailabilityDTO } from '../../api/types';
 import { Card, ErrorView, LoadingView, SectionTitle } from '../../components/ui';
+import { Icon } from '../../components/Icon';
 import { colors, fontSize, radius, spacing } from '../../theme';
+import { TAB_BAR_CLEARANCE } from '../../navigation/useTabBarStyle';
 import { formatDateFR, isoDaysFromNow, todayISO } from '../../utils/format';
 
 const TIMESLOT_LABELS: Record<string, string> = { morning: 'Matin', afternoon: 'Après-midi', day: 'Journée' };
 
 export default function AvailabilityScreen() {
   const { user } = useAuth();
-  const isCoach = user?.role === 'coach';
+  const isCoach = user?.role === 'coach' || user?.role === 'admin';
   const [slots, setSlots] = useState<AvailabilityDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -64,7 +66,7 @@ export default function AvailabilityScreen() {
       </Text>
       {Array.from(byDate.entries()).map(([date, daySlots]) => (
         <Card key={date} style={{ marginBottom: spacing.md }}>
-          <SectionTitle icon="🗓️">{formatDateFR(date)}</SectionTitle>
+          <SectionTitle icon="calendar">{formatDateFR(date)}</SectionTitle>
           <View style={styles.slotsRow}>
             {daySlots.map((slot) => (
               <Pressable
@@ -76,9 +78,12 @@ export default function AvailabilityScreen() {
                   pressed && isCoach && { opacity: 0.6, transform: [{ scale: 0.97 }] },
                 ]}
               >
-                <Text style={[styles.slotText, { color: slot.available ? colors.success : colors.textFaint }]}>
-                  {slot.available ? '✓ ' : ''}{TIMESLOT_LABELS[slot.timeslot] ?? slot.timeslot}
-                </Text>
+                <View style={styles.slotContent}>
+                  {slot.available ? <Icon name="check" size={13} color={colors.success} /> : null}
+                  <Text style={[styles.slotText, { color: slot.available ? colors.success : colors.textFaint }]}>
+                    {TIMESLOT_LABELS[slot.timeslot] ?? slot.timeslot}
+                  </Text>
+                </View>
               </Pressable>
             ))}
           </View>
@@ -90,9 +95,10 @@ export default function AvailabilityScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.lg, paddingBottom: spacing.xxl },
+  content: { padding: spacing.lg, paddingBottom: spacing.xxl + TAB_BAR_CLEARANCE },
   hint: { color: colors.textMuted, marginBottom: spacing.md, fontSize: fontSize.sm },
   slotsRow: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
   slot: { paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radius.pill, borderWidth: 1 },
+  slotContent: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   slotText: { fontWeight: '600', fontSize: fontSize.sm },
 });

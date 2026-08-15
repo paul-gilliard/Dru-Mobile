@@ -1,9 +1,10 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { deleteItemAsync, getItemAsync, setItemAsync } from '../utils/secureStorage';
-import { loginRequest, meRequest } from '../api/auth';
-import { apiErrorMessage, TOKEN_KEY } from '../api/client';
+import { loginRequest, meRequest, registerRequest } from '../api/auth';
+import { apiErrorMessage, hydrateAuthToken, setAuthToken, TOKEN_KEY } from '../api/client';
 import { UserDTO } from '../api/types';
+import { cacheClearAll } from '../utils/apiCache';
 import { ensurePerfQueueFlushOnForeground, prefetchAthleteData } from '../utils/prefetch';
+import { deleteItemAsync } from '../utils/secureStorage';
 
 interface AuthContextValue {
   user: UserDTO | null;
@@ -11,8 +12,10 @@ interface AuthContextValue {
   isAuthenticating: boolean;
   error: string | null;
   login: (username: string, password: string) => Promise<void>;
+  register: (payload: { username: string; password: string; display_name?: string }) => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -30,7 +33,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const token = await getItemAsync(TOKEN_KEY);
+        const token = await hydrateAuthToken();
         if (token) {
           const me = await meRequest();
           setUser(me);
@@ -38,6 +41,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       } catch {
         try {
+          await setAuthToken(null);
           await deleteItemAsync(TOKEN_KEY);
         } catch {
           // Le stockage sécurisé n'est pas pleinement supporté sur web ; on ignore.
@@ -53,7 +57,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setError(null);
     try {
       const { token, user: loggedInUser } = await loginRequest(username, password);
-      await setItemAsync(TOKEN_KEY, token);
+      await setAuthToken(token);
       setUser(loggedInUser);
       void prefetchAthleteData(loggedInUser);
     } catch (err) {
@@ -64,20 +68,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const register = useCallback(async (payload: { username: string; password: string; display_name?: string }) => {
+    setIsAuthenticating(true);
+    setError(null);
+    try {
+      const { token, user: loggedInUser } = await registerRequest(payload);
+      await setAuthToken(token);
+      setUser(loggedInUser);
+      void prefetchAthleteData(loggedInUser);
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Inscription impossible'));
+      throw err;
+    } finally {
+      setIsAuthenticating(false);
+    }
+  }, []);
+
+  const refreshUser = useCallback(async () => {
+    try {
+      const me = await meRequest();
+      setUser(me);
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const logout = useCallback(async () => {
     try {
-      await deleteItemAsync(TOKEN_KEY);
+      await setAuthToken(null);
     } catch {
       // Idem : ignoré si la plateforme (ex: web) ne supporte pas la suppression.
     }
+    await cacheClearAll();
     setUser(null);
   }, []);
 
   const clearError = useCallback(() => setError(null), []);
 
   const value = useMemo(
-    () => ({ user, isLoading, isAuthenticating, error, login, logout, clearError }),
-    [user, isLoading, isAuthenticating, error, login, logout, clearError]
+    () => ({ user, isLoading, isAuthenticating, error, login, register, logout, clearError, refreshUser }),
+    [user, isLoading, isAuthenticating, error, login, register, logout, clearError, refreshUser]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

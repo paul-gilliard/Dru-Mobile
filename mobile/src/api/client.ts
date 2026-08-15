@@ -1,17 +1,49 @@
 import axios from 'axios';
-import { getItemAsync } from '../utils/secureStorage';
+import { deleteItemAsync, getItemAsync, setItemAsync } from '../utils/secureStorage';
 import { API_URL } from './config';
 
 export const TOKEN_KEY = 'dru_mobile_token';
 
+/** Token en mémoire pour éviter un SecureStore read à chaque requête Axios. */
+let memoryToken: string | null = null;
+
+export function getAuthToken(): string | null {
+  return memoryToken;
+}
+
+export async function setAuthToken(token: string | null): Promise<void> {
+  memoryToken = token;
+  if (token) {
+    await setItemAsync(TOKEN_KEY, token);
+  } else {
+    try {
+      await deleteItemAsync(TOKEN_KEY);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+export async function hydrateAuthToken(): Promise<string | null> {
+  if (memoryToken) return memoryToken;
+  try {
+    memoryToken = await getItemAsync(TOKEN_KEY);
+  } catch {
+    memoryToken = null;
+  }
+  return memoryToken;
+}
+
 export const apiClient = axios.create({
   baseURL: API_URL,
-  timeout: 10000,
+  // 20s : Railway peut être froid au premier hit ; 10s était trop juste
+  // et provoquait souvent « Le serveur met trop de temps à répondre ».
+  timeout: 20000,
 });
 
 apiClient.interceptors.request.use(async (config) => {
   try {
-    const token = await getItemAsync(TOKEN_KEY);
+    const token = memoryToken ?? (await hydrateAuthToken());
     if (token) {
       config.headers = config.headers ?? {};
       config.headers.Authorization = `Bearer ${token}`;

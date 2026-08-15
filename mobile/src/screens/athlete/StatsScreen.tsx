@@ -12,14 +12,13 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 import { useAthleteScope } from '../../context/AthleteScopeContext';
 import {
-  getDailyActivity,
   getExerciseHistory,
-  getExercisesByMuscle,
-  getJournalTrend,
   getSeriesBreakdown,
-  getWeeklyOverview,
+  getStatsBootstrap,
+  TTL,
 } from '../../api/resources';
 import { apiErrorMessage } from '../../api/client';
 import {
@@ -32,10 +31,13 @@ import {
 } from '../../api/types';
 import { TapBarChart, TapHBarChart, TapLineChart, ChartDatum } from '../../components/ClickableCharts';
 import { Card, EmptyState, ErrorView, LoadingView, SectionTitle } from '../../components/ui';
+import { Icon, IconName } from '../../components/Icon';
 import { colors, fontSize, gradients, muscleColors, radius, spacing } from '../../theme';
+import { TAB_BAR_CLEARANCE } from '../../navigation/useTabBarStyle';
 import {
   classifyExercise,
   verdictColor,
+  verdictIcon,
   verdictLabel,
   ClassifyResult,
 } from '../../utils/classifyExercise';
@@ -52,6 +54,7 @@ import {
   weekEndISO,
   weekStartISO,
 } from '../../utils/format';
+import { cacheGetSync, cachePeekSync } from '../../utils/apiCache';
 
 const W = Math.max(280, Dimensions.get('window').width - spacing.lg * 4);
 
@@ -97,12 +100,12 @@ function fmt(v: number | null | undefined, d = 1) {
   return Number(v).toFixed(d).replace(/\.0$/, '');
 }
 
-function diffTxt(cur: number | null, prev: number | null) {
-  if (cur == null || prev == null) return { t: '—', c: colors.textFaint };
+function diffTxt(cur: number | null, prev: number | null): { t: string; c: string; icon: IconName } {
+  if (cur == null || prev == null) return { t: '—', c: colors.textFaint, icon: 'trend-flat' };
   const d = cur - prev;
-  if (Math.abs(d) < 0.05) return { t: '→ stable', c: colors.textFaint };
-  if (d > 0) return { t: `↑ +${fmt(d)}`, c: colors.success };
-  return { t: `↓ ${fmt(d)}`, c: colors.danger };
+  if (Math.abs(d) < 0.05) return { t: 'stable', c: colors.textFaint, icon: 'trend-flat' };
+  if (d > 0) return { t: `+${fmt(d)}`, c: colors.success, icon: 'trend-up' };
+  return { t: fmt(d), c: colors.danger, icon: 'trend-down' };
 }
 
 function inRange(iso: string, start: string, end: string) {
@@ -180,7 +183,7 @@ function CheckChip({
       onPress={onPress}
       style={[styles.checkChip, checked && { backgroundColor: color ?? colors.primary, borderColor: color ?? colors.primary }]}
     >
-      <Text style={[styles.checkMark, checked && { color: '#fff' }]}>{checked ? '✓' : '○'}</Text>
+      <Icon name={checked ? 'check-circle' : 'circle'} size={13} color={checked ? '#fff' : colors.textFaint} />
       <Text style={[styles.checkLabel, checked && { color: '#fff' }]} numberOfLines={1}>{label}</Text>
     </Pressable>
   );
@@ -202,14 +205,14 @@ function CyclePicker({
       <Text style={styles.cycleLabel}>{label}</Text>
       <View style={styles.cycleRow}>
         <Pressable onPress={onPrev} style={styles.cycleBtn} hitSlop={8}>
-          <Text style={styles.cycleBtnText}>‹</Text>
+          <Icon name="chevron-left" size={16} color={colors.textMuted} />
         </Pressable>
         <View style={styles.cycleValueBox}>
           <Text style={[styles.cycleValue, color ? { color } : null]} numberOfLines={2}>{value}</Text>
           {hint ? <Text style={styles.cycleHint}>{hint}</Text> : null}
         </View>
         <Pressable onPress={onNext} style={styles.cycleBtn} hitSlop={8}>
-          <Text style={styles.cycleBtnText}>›</Text>
+          <Icon name="chevron-right" size={16} color={colors.textMuted} />
         </Pressable>
       </View>
     </View>
@@ -257,7 +260,7 @@ function ModeSwitch({ mode, onChange }: { mode: PeriodMode; onChange: (m: Period
 function DetailSheet({ detail, onClose }: { detail: DetailState; onClose: () => void }) {
   return (
     <Modal visible={!!detail} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalOverlay}>
+      <BlurView intensity={35} tint="dark" style={styles.modalOverlay}>
         <View style={styles.modalCard}>
           <Text style={styles.modalTitle}>{detail?.title}</Text>
           {detail?.subtitle ? <Text style={styles.modalSub}>{detail.subtitle}</Text> : null}
@@ -298,31 +301,46 @@ function DetailSheet({ detail, onClose }: { detail: DetailState; onClose: () => 
 
             {detail?.classify ? (
               <View style={styles.breakBlock}>
-                <Text style={[styles.breakTitle, {
-                  color: verdictColor(detail.classify.verdict, colors),
-                }]}
-                >
-                  {verdictLabel(detail.classify.verdict)} (règles Easy Bilan)
-                </Text>
-                <Text style={styles.breakMeta}>
-                  {formatDateMediumFR(detail.classify.cur_date)} vs {formatDateMediumFR(detail.classify.prev_date)}
-                  {' · '}🟢 {detail.classify.stats.count_progress}
-                  {' · '}🔴 {detail.classify.stats.count_regression}
-                  {' · '}→ {detail.classify.stats.count_same}
-                </Text>
+                <View style={styles.breakTitleRow}>
+                  <Icon name={verdictIcon(detail.classify.verdict)} size={14} color={verdictColor(detail.classify.verdict, colors)} />
+                  <Text style={[styles.breakTitle, {
+                    color: verdictColor(detail.classify.verdict, colors),
+                  }]}
+                  >
+                    {verdictLabel(detail.classify.verdict)} (règles Easy Bilan)
+                  </Text>
+                </View>
+                <View style={styles.breakMetaRow}>
+                  <Text style={styles.breakMeta}>
+                    {formatDateMediumFR(detail.classify.cur_date)} vs {formatDateMediumFR(detail.classify.prev_date)}
+                    {'  '}
+                  </Text>
+                  <Icon name="trend-up" size={11} color={colors.success} />
+                  <Text style={styles.breakMeta}> {detail.classify.stats.count_progress}  </Text>
+                  <Icon name="trend-down" size={11} color={colors.danger} />
+                  <Text style={styles.breakMeta}> {detail.classify.stats.count_regression}  </Text>
+                  <Icon name="trend-flat" size={11} color={colors.textFaint} />
+                  <Text style={styles.breakMeta}> {detail.classify.stats.count_same}</Text>
+                </View>
                 {detail.classify.rows.map((r) => {
                   const rowColor = r.verdict === 'regression' ? colors.danger
                     : r.verdict === 'progress' ? colors.success
                       : r.verdict === 'same' ? colors.textMuted : colors.textFaint;
-                  const rowText = r.verdict === 'regression' ? '↓ Régression'
-                    : r.verdict === 'progress' ? '↑ Progrès'
-                      : r.verdict === 'same' ? '→ Identique' : '? Incomplet';
+                  const rowText = r.verdict === 'regression' ? 'Régression'
+                    : r.verdict === 'progress' ? 'Progrès'
+                      : r.verdict === 'same' ? 'Identique' : 'Incomplet';
+                  const rowIcon: IconName = r.verdict === 'regression' ? 'trend-down'
+                    : r.verdict === 'progress' ? 'trend-up'
+                      : r.verdict === 'same' ? 'trend-flat' : 'warning';
                   return (
                     <View key={r.num} style={styles.seriesRow}>
                       <Text style={styles.seriesMain}>S{r.num}</Text>
                       <Text style={styles.seriesVals}>{r.c_load ?? '—'} kg × {r.c_reps ?? '—'}</Text>
                       <Text style={styles.seriesDate}>vs {r.p_load ?? '—'} kg × {r.p_reps ?? '—'}</Text>
-                      <Text style={[styles.seriesNote, { color: rowColor }]}>{rowText}</Text>
+                      <View style={styles.seriesNoteRow}>
+                        <Icon name={rowIcon} size={11} color={rowColor} />
+                        <Text style={[styles.seriesNote, { color: rowColor }]}>{rowText}</Text>
+                      </View>
                     </View>
                   );
                 })}
@@ -361,17 +379,20 @@ function DetailSheet({ detail, onClose }: { detail: DetailState; onClose: () => 
             <Text style={styles.modalCloseText}>Fermer</Text>
           </Pressable>
         </View>
-      </View>
+      </BlurView>
     </Modal>
   );
 }
 
 function Kpi({
-  value, label, color, unit,
-}: { value: string; label: string; color: string; unit?: string }) {
+  value, label, color, unit, icon,
+}: { value: string; label: string; color: string; unit?: string; icon?: IconName }) {
   return (
     <View style={styles.kpi}>
-      <Text style={[styles.kpiValue, { color }]}>{value}{unit ? <Text style={styles.kpiUnit}> {unit}</Text> : null}</Text>
+      <View style={styles.kpiValueRow}>
+        {icon ? <Icon name={icon} size={13} color={color} /> : null}
+        <Text style={[styles.kpiValue, { color }]}>{value}{unit ? <Text style={styles.kpiUnit}> {unit}</Text> : null}</Text>
+      </View>
       <Text style={styles.kpiLabel}>{label}</Text>
     </View>
   );
@@ -379,24 +400,42 @@ function Kpi({
 
 export default function StatsScreen() {
   const { athleteId } = useAthleteScope();
+  const bootstrapKey = athleteId ? `stats:bootstrap:${athleteId}:180:24` : null;
+  const cachedBoot = bootstrapKey
+    ? cacheGetSync<{
+        daily_activity: DailyActivityDTO[];
+        journal_trend: JournalTrendDTO[];
+        weekly_overview: { weeks: WeeklyOverviewWeekDTO[] };
+        exercises_by_muscle: MuscleExercisesDTO[];
+      }>(bootstrapKey, TTL.stats)
+      ?? cachePeekSync<{
+        daily_activity: DailyActivityDTO[];
+        journal_trend: JournalTrendDTO[];
+        weekly_overview: { weeks: WeeklyOverviewWeekDTO[] };
+        exercises_by_muscle: MuscleExercisesDTO[];
+      }>(bootstrapKey)?.data
+      ?? null
+    : null;
+
   const [mode, setMode] = useState<PeriodMode>('semaine');
   const [anchor, setAnchor] = useState(todayISO());
-  const [activity, setActivity] = useState<DailyActivityDTO[]>([]);
-  const [journal, setJournal] = useState<JournalTrendDTO[]>([]);
-  const [overview, setOverview] = useState<WeeklyOverviewWeekDTO[]>([]);
-  const [byMuscle, setByMuscle] = useState<MuscleExercisesDTO[]>([]);
-  const [muscle, setMuscle] = useState<string | null>(null);
+  const [activity, setActivity] = useState<DailyActivityDTO[]>(cachedBoot?.daily_activity ?? []);
+  const [journal, setJournal] = useState<JournalTrendDTO[]>(cachedBoot?.journal_trend ?? []);
+  const [overview, setOverview] = useState<WeeklyOverviewWeekDTO[]>(cachedBoot?.weekly_overview?.weeks ?? []);
+  const [byMuscle, setByMuscle] = useState<MuscleExercisesDTO[]>(cachedBoot?.exercises_by_muscle ?? []);
+  const [muscle, setMuscle] = useState<string | null>(cachedBoot?.exercises_by_muscle?.[0]?.muscle ?? null);
   const [exercise, setExercise] = useState<string | null>(null);
   const [exHistory, setExHistory] = useState<ExerciseHistoryDTO | null>(null);
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null);
   const [perfView, setPerfView] = useState<PerfView>('repartition');
-  const [crossMuscle, setCrossMuscle] = useState<string | null>(null);
+  const [crossMuscle, setCrossMuscle] = useState<string | null>(cachedBoot?.exercises_by_muscle?.[0]?.muscle ?? null);
   const [healthChecked, setHealthChecked] = useState<HealthKey[]>(['kcals', 'sleep_hours']);
   const [crossChecked, setCrossChecked] = useState<CrossKey[]>(['weight', 'charge']);
   const [detail, setDetail] = useState<DetailState>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!cachedBoot);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hasDataRef = React.useRef(!!cachedBoot);
 
   const periods = useMemo(() => buildWindow(mode, anchor), [mode, anchor]);
   const focus = useMemo(() => {
@@ -411,44 +450,34 @@ export default function StatsScreen() {
   const today = todayISO();
   const canNext = periods[periods.length - 1]?.end < today;
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     if (!athleteId) {
       setError('Athlète introuvable');
       setLoading(false);
       setRefreshing(false);
       return;
     }
+    if (!hasDataRef.current) setLoading(true);
+    else if (force) setRefreshing(true);
     try {
       setError(null);
-      const results = await Promise.allSettled([
-        getDailyActivity(athleteId, 200),
-        getJournalTrend(athleteId, 200),
-        getWeeklyOverview(athleteId, 26),
-        getExercisesByMuscle(athleteId),
-      ]);
-      const [actR, jrR, ovR, musR] = results;
-      const failures = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[];
-      if (failures.length === results.length) {
-        setError(apiErrorMessage(failures[0].reason));
-        return;
-      }
-      if (actR.status === 'fulfilled') setActivity(actR.value);
-      if (jrR.status === 'fulfilled') setJournal(jrR.value);
-      if (ovR.status === 'fulfilled') setOverview(ovR.value.weeks);
-      if (musR.status === 'fulfilled') {
-        setByMuscle(musR.value);
-        setMuscle((cur) => cur ?? musR.value[0]?.muscle ?? null);
-        setCrossMuscle((cur) => cur ?? musR.value[0]?.muscle ?? null);
-      }
+      const boot = await getStatsBootstrap(athleteId, { days: 180, weeks: 24, force });
+      hasDataRef.current = true;
+      setActivity(boot.daily_activity);
+      setJournal(boot.journal_trend);
+      setOverview(boot.weekly_overview.weeks);
+      setByMuscle(boot.exercises_by_muscle);
+      setMuscle((cur) => cur ?? boot.exercises_by_muscle[0]?.muscle ?? null);
+      setCrossMuscle((cur) => cur ?? boot.exercises_by_muscle[0]?.muscle ?? null);
     } catch (err) {
-      setError(apiErrorMessage(err));
+      if (!hasDataRef.current) setError(apiErrorMessage(err));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, [athleteId]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(useCallback(() => { void load(false); }, [load]));
 
   useEffect(() => {
     setSelectedPeriodId(null);
@@ -473,7 +502,7 @@ export default function StatsScreen() {
       return;
     }
     let cancelled = false;
-    getExerciseHistory(athleteId, exercise, 200)
+    getExerciseHistory(athleteId, exercise, 180)
       .then((h) => { if (!cancelled) setExHistory(h); })
       .catch(() => { if (!cancelled) setExHistory({ exercise, sessions: [] }); });
     return () => { cancelled = true; };
@@ -713,9 +742,13 @@ export default function StatsScreen() {
     }
   }, [byMuscle, muscleTonnageInPeriod, prevPeriod, athleteId, mode, openExerciseDrill]);
 
-  if (loading) return <LoadingView label="Préparation du terrain de stats..." />;
-  if (error) return <ErrorView message={error} onRetry={load} />;
-  if (!focus) return <EmptyState icon="📊" title="Pas de période" />;
+  if (loading && !activity.length && !journal.length && !byMuscle.length) {
+    return <LoadingView label="Préparation du terrain de stats..." />;
+  }
+  if (error && !activity.length && !journal.length) {
+    return <ErrorView message={error} onRetry={() => void load(true)} />;
+  }
+  if (!focus) return <EmptyState icon="stats" title="Pas de période" />;
 
   const focusSessions = metricForPeriod(focus, 'sessions');
   const focusTonnage = metricForPeriod(focus, 'tonnage');
@@ -791,7 +824,7 @@ export default function StatsScreen() {
     <ScrollView
       style={styles.screen}
       contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { void load(true); }} tintColor={colors.primary} />}
     >
       <Text style={styles.kicker}>TERRAIN DE JEU</Text>
       <Text style={styles.title}>Stats</Text>
@@ -804,27 +837,27 @@ export default function StatsScreen() {
 
       <Card style={styles.periodCard}>
         <View style={styles.periodNav}>
-          <Pressable onPress={() => shiftWindow(-1)} style={styles.navBtn}><Text style={styles.navBtnText}>‹</Text></Pressable>
+          <Pressable onPress={() => shiftWindow(-1)} style={styles.navBtn}><Icon name="chevron-left" size={18} color={colors.textMuted} /></Pressable>
           <Pressable onPress={() => setAnchor(todayISO())} style={{ flex: 1, alignItems: 'center', paddingHorizontal: spacing.sm }}>
             <Text style={styles.periodLabel}>Fenêtre {mode}</Text>
             <Text style={styles.periodHint}>{windowLabel}</Text>
             <Text style={styles.periodFocus}>Focus : {focus.label}</Text>
           </Pressable>
           <Pressable onPress={() => canNext && shiftWindow(1)} disabled={!canNext} style={[styles.navBtn, !canNext && { opacity: 0.3 }]}>
-            <Text style={styles.navBtnText}>›</Text>
+            <Icon name="chevron-right" size={18} color={colors.textMuted} />
           </Pressable>
         </View>
       </Card>
 
       {/* 1 Régularité */}
       <Card style={styles.section}>
-        <SectionTitle icon="📅">1 · Régularité</SectionTitle>
+        <SectionTitle icon="calendar">1 · Régularité</SectionTitle>
         <Text style={styles.sectionHint}>
           {WINDOW[mode]} {mode === 'jour' ? 'jours' : mode === 'semaine' ? 'semaines' : 'mois'} côte à côte
         </Text>
         <View style={styles.kpiRow}>
           <Kpi value={String(focusSessions)} label="jours actifs" color={colors.success} />
-          <Kpi value={diffTxt(focusSessions, prevSessions).t} label="vs préc." color={diffTxt(focusSessions, prevSessions).c} />
+          <Kpi value={diffTxt(focusSessions, prevSessions).t} label="vs préc." color={diffTxt(focusSessions, prevSessions).c} icon={diffTxt(focusSessions, prevSessions).icon} />
           <Kpi value={fmt(focusTonnage, 0)} label="kg tonnage" color={colors.primary} />
         </View>
         <TapBarChart
@@ -842,10 +875,10 @@ export default function StatsScreen() {
 
       {/* 2 Poids */}
       <Card style={styles.section}>
-        <SectionTitle icon="⚖️">2 · Poids de corps</SectionTitle>
+        <SectionTitle icon="scale">2 · Poids de corps</SectionTitle>
         <View style={styles.kpiRow}>
           <Kpi value={fmt(weightNow)} label="focus" unit="kg" color={colors.secondary} />
-          <Kpi value={diffTxt(weightNow, weightPrev).t} label="vs préc." color={diffTxt(weightNow, weightPrev).c} />
+          <Kpi value={diffTxt(weightNow, weightPrev).t} label="vs préc." color={diffTxt(weightNow, weightPrev).c} icon={diffTxt(weightNow, weightPrev).icon} />
         </View>
         {weightSeries.length >= 2 ? (
           <TapLineChart
@@ -861,13 +894,13 @@ export default function StatsScreen() {
             }}
           />
         ) : (
-          <EmptyState icon="⚖️" title="Pas assez de poids journalisé" />
+          <EmptyState icon="scale" title="Pas assez de poids journalisé" />
         )}
       </Card>
 
       {/* 3 Perfs */}
       <Card style={styles.section}>
-        <SectionTitle icon="🏋️">3 · Perfs sportives</SectionTitle>
+        <SectionTitle icon="exercise">3 · Perfs sportives</SectionTitle>
         <Text style={styles.sectionHint}>
           Répartition muscles → évolution (moyennes {mode}) → charge exo. Tape pour le détail / Easy Bilan.
         </Text>
@@ -917,7 +950,7 @@ export default function StatsScreen() {
           <>
             <View style={styles.kpiRow}>
               <Kpi value={fmt(focusTonnage, 0)} label="tonnage focus" unit="kg" color={colors.primary} />
-              <Kpi value={diffTxt(focusTonnage, prevTonnage).t} label="vs préc." color={diffTxt(focusTonnage, prevTonnage).c} />
+              <Kpi value={diffTxt(focusTonnage, prevTonnage).t} label="vs préc." color={diffTxt(focusTonnage, prevTonnage).c} icon={diffTxt(focusTonnage, prevTonnage).icon} />
             </View>
             {muscleBars.length ? (
               <TapHBarChart
@@ -932,7 +965,7 @@ export default function StatsScreen() {
                 }}
               />
             ) : (
-              <EmptyState icon="🏋️" title="Pas de volume musculaire" />
+              <EmptyState icon="exercise" title="Pas de volume musculaire" />
             )}
           </>
         ) : null}
@@ -942,7 +975,7 @@ export default function StatsScreen() {
             <View style={styles.kpiRow}>
               <Kpi value={fmt(muscleAvg, 0)} label={avgWord} unit="kg" color={muscleColors[muscle] ?? colors.primary} />
               <Kpi value={fmt(focusMuscleTon, 0)} label="focus" unit="kg" color={colors.primary} />
-              <Kpi value={diffTxt(focusMuscleTon, prevMuscleTon).t} label="vs préc." color={diffTxt(focusMuscleTon, prevMuscleTon).c} />
+              <Kpi value={diffTxt(focusMuscleTon, prevMuscleTon).t} label="vs préc." color={diffTxt(focusMuscleTon, prevMuscleTon).c} icon={diffTxt(focusMuscleTon, prevMuscleTon).icon} />
             </View>
             {muscleHistory.some((d) => d.value > 0) ? (
               <TapBarChart
@@ -957,7 +990,7 @@ export default function StatsScreen() {
                 }}
               />
             ) : (
-              <EmptyState icon="🏋️" title="Pas de tonnage sur cette fenêtre" />
+              <EmptyState icon="exercise" title="Pas de tonnage sur cette fenêtre" />
             )}
           </>
         ) : null}
@@ -967,17 +1000,13 @@ export default function StatsScreen() {
             <View style={styles.kpiRow}>
               <Kpi value={fmt(loadAvg)} label={avgWord} unit="kg" color={colors.gold} />
               <Kpi value={fmt(metricForPeriod(focus, 'charge') || null)} label="focus" unit="kg" color={colors.gold} />
-              <Kpi
-                value={diffTxt(
+              {(() => {
+                const dCharge = diffTxt(
                   metricForPeriod(focus, 'charge') || null,
                   prevPeriod ? metricForPeriod(prevPeriod, 'charge') || null : null,
-                ).t}
-                label="vs préc."
-                color={diffTxt(
-                  metricForPeriod(focus, 'charge') || null,
-                  prevPeriod ? metricForPeriod(prevPeriod, 'charge') || null : null,
-                ).c}
-              />
+                );
+                return <Kpi value={dCharge.t} label="vs préc." color={dCharge.c} icon={dCharge.icon} />;
+              })()}
             </View>
             {loadSeries.length >= 2 ? (
               <TapLineChart
@@ -994,7 +1023,7 @@ export default function StatsScreen() {
                 }}
               />
             ) : (
-              <EmptyState icon="🏋️" title="Pas assez de séances pour la courbe" />
+              <EmptyState icon="exercise" title="Pas assez de séances pour la courbe" />
             )}
           </>
         ) : null}
@@ -1002,7 +1031,7 @@ export default function StatsScreen() {
 
       {/* 4 Santé */}
       <Card style={styles.section}>
-        <SectionTitle icon="💚">4 · Santé</SectionTitle>
+        <SectionTitle icon="heart">4 · Santé</SectionTitle>
         <Text style={styles.sectionHint}>Coche les courbes · chaque point = une période de la fenêtre</Text>
         <View style={styles.wrapChips}>
           {HEALTH_OPTS.filter((h) => h.key !== 'weight').map((h) => (
@@ -1034,7 +1063,11 @@ export default function StatsScreen() {
             <View key={key} style={styles.healthBlock}>
               <View style={styles.healthHead}>
                 <Text style={[styles.healthTitle, { color: meta.color }]}>{meta.label}</Text>
-                <Text style={styles.healthAvg}>{fmt(now)} {meta.unit} · <Text style={{ color: d.c }}>{d.t}</Text></Text>
+                <View style={styles.healthAvgRow}>
+                  <Text style={styles.healthAvg}>{fmt(now)} {meta.unit} · </Text>
+                  <Icon name={d.icon} size={11} color={d.c} />
+                  <Text style={[styles.healthAvg, { color: d.c }]}>{d.t}</Text>
+                </View>
               </View>
               {series.length >= 2 ? (
                 <TapLineChart
@@ -1058,9 +1091,9 @@ export default function StatsScreen() {
 
       {/* 5 Croisé */}
       <Card style={styles.section}>
-        <SectionTitle icon="🔀">5 · Analyse croisée</SectionTitle>
+        <SectionTitle icon="shuffle">5 · Analyse croisée</SectionTitle>
         <Text style={styles.sectionHint}>
-          Plusieurs courbes, chacune avec son échelle. Pour tonnage / charge : change muscle ou exo avec ‹ ›.
+          Plusieurs courbes, chacune avec son échelle. Pour tonnage / charge : change muscle ou exo avec les flèches.
         </Text>
         <View style={styles.wrapChips}>
           {CROSS_OPTS.map((o) => (
@@ -1226,7 +1259,7 @@ export default function StatsScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.lg, paddingBottom: spacing.xxl * 1.5 },
+  content: { padding: spacing.lg, paddingBottom: spacing.xxl * 1.5 + TAB_BAR_CLEARANCE },
   kicker: { color: colors.primary, fontWeight: '800', fontSize: 11, letterSpacing: 1.2 },
   title: { color: colors.text, fontSize: fontSize.xxl, fontWeight: '900', marginTop: 2 },
   subtitle: { color: colors.textMuted, fontSize: fontSize.sm, lineHeight: 20, marginTop: 6, marginBottom: spacing.md },
@@ -1254,6 +1287,7 @@ const styles = StyleSheet.create({
   sectionHint: { color: colors.textFaint, fontSize: fontSize.xs, fontWeight: '600', marginBottom: spacing.md, marginTop: -4 },
   kpiRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
   kpi: { flex: 1, backgroundColor: colors.backgroundAlt, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: colors.border },
+  kpiValueRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   kpiValue: { fontSize: fontSize.lg, fontWeight: '900' },
   kpiUnit: { fontSize: fontSize.xs, fontWeight: '700' },
   kpiLabel: { color: colors.textFaint, fontSize: 11, fontWeight: '700', marginTop: 4 },
@@ -1297,8 +1331,9 @@ const styles = StyleSheet.create({
   healthBlock: { marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.border },
   healthHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.xs },
   healthTitle: { fontWeight: '900', fontSize: fontSize.sm },
+  healthAvgRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   healthAvg: { color: colors.textMuted, fontWeight: '700', fontSize: fontSize.xs },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(5,6,8,0.35)', justifyContent: 'flex-end' },
   modalCard: {
     backgroundColor: colors.surface, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg,
     padding: spacing.lg, borderWidth: 1, borderColor: colors.border, maxHeight: '85%',
@@ -1318,11 +1353,14 @@ const styles = StyleSheet.create({
   },
   modalCloseText: { color: colors.text, fontWeight: '800' },
   breakBlock: { marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: 2, borderTopColor: colors.borderLight },
+  breakTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   breakTitle: { color: colors.gold, fontWeight: '900', fontSize: fontSize.sm, textTransform: 'capitalize' },
   breakMeta: { color: colors.textFaint, fontSize: 11, fontWeight: '600', marginBottom: spacing.xs, marginTop: 4 },
+  breakMetaRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginBottom: spacing.xs, marginTop: 4 },
   seriesRow: { paddingVertical: 6, borderTopWidth: 1, borderTopColor: colors.border },
   seriesMain: { color: colors.text, fontWeight: '800', fontSize: fontSize.sm },
   seriesVals: { color: colors.primary, fontWeight: '800', fontSize: fontSize.sm, marginTop: 2 },
   seriesDate: { color: colors.textFaint, fontSize: 11, marginTop: 2 },
-  seriesNote: { fontSize: 11, marginTop: 2, fontWeight: '700' },
+  seriesNoteRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  seriesNote: { fontSize: 11, fontWeight: '700' },
 });

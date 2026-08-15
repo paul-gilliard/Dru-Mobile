@@ -4,6 +4,16 @@
     "appVersionSource": "local"
   },
   "build": {
+    "development": {
+      "distribution": "internal",
+      "developmentClient": true,
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://web-production-9fd5b.up.railway.app/api"
+      }
+    },
     "preview": {
       "distribution": "internal",
       "android": {

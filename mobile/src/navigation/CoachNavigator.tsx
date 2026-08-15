@@ -1,12 +1,12 @@
 import React from 'react';
-import { Text } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { colors } from '../theme';
 import { CoachStackParamList } from './types';
 import CoachDashboardScreen from '../screens/coach/CoachDashboardScreen';
 import AthleteDetailScreen from '../screens/coach/AthleteDetailScreen';
-import CreateAthleteScreen from '../screens/coach/CreateAthleteScreen';
+import InviteAthleteScreen from '../screens/coach/InviteAthleteScreen';
+import ManageTeamScreen from '../screens/coach/ManageTeamScreen';
 import ExerciseBankScreen from '../screens/coach/ExerciseBankScreen';
 import FoodBankScreen from '../screens/coach/FoodBankScreen';
 import CoachMoreScreen from '../screens/coach/CoachMoreScreen';
@@ -14,6 +14,8 @@ import UsersScreen from '../screens/coach/UsersScreen';
 import WeeklyBilanScreen from '../screens/coach/WeeklyBilanScreen';
 import SessionDetailScreen from '../screens/athlete/SessionDetailScreen';
 import { useTabBarStyle } from './useTabBarStyle';
+import { GlassTabBarBackground } from '../components/ui';
+import { Icon, IconName } from '../components/Icon';
 
 const Stack = createNativeStackNavigator<CoachStackParamList>();
 const Tab = createBottomTabNavigator();
@@ -35,7 +37,6 @@ function DashboardStack() {
         options={({ route }) => ({ title: route.params.athleteName })}
       />
       <Stack.Screen name="SessionDetail" component={SessionDetailScreen} options={{ title: 'Séance' }} />
-      <Stack.Screen name="CreateAthlete" component={CreateAthleteScreen} options={{ title: 'Nouvel athlète' }} />
     </Stack.Navigator>
   );
 }
@@ -69,12 +70,14 @@ function MoreStack() {
     <Stack.Navigator screenOptions={stackScreenOptions}>
       <Stack.Screen name="Dashboard" component={CoachMoreScreen} options={{ title: 'Plus' }} />
       <Stack.Screen name="Users" component={UsersScreen} options={{ title: 'Utilisateurs' }} />
+      <Stack.Screen name="InviteAthlete" component={InviteAthleteScreen} options={{ title: 'Inviter un athlète' }} />
+      <Stack.Screen name="ManageTeam" component={ManageTeamScreen} options={{ title: 'Gérer mon équipe' }} />
     </Stack.Navigator>
   );
 }
 
-function TabIcon({ emoji }: { emoji: string }) {
-  return <Text style={{ fontSize: 20 }}>{emoji}</Text>;
+function TabIcon({ name, color }: { name: IconName; color: string }) {
+  return <Icon name={name} size={22} color={color} />;
 }
 
 export default function CoachNavigator() {
@@ -86,14 +89,15 @@ export default function CoachNavigator() {
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textFaint,
         tabBarStyle,
+        tabBarBackground: () => <GlassTabBarBackground />,
         tabBarLabelStyle: { fontWeight: '700', fontSize: 11 },
       }}
     >
-      <Tab.Screen name="DashboardTab" component={DashboardStack} options={{ title: 'Athlètes', tabBarIcon: () => <TabIcon emoji="👥" /> }} />
-      <Tab.Screen name="ExercisesTab" component={ExerciseBankStack} options={{ title: 'Exercices', tabBarIcon: () => <TabIcon emoji="🏋️" /> }} />
-      <Tab.Screen name="FoodsTab" component={FoodBankStack} options={{ title: 'Aliments', tabBarIcon: () => <TabIcon emoji="🍎" /> }} />
-      <Tab.Screen name="BilanTab" component={BilanStack} options={{ title: 'Easy Bilan', tabBarIcon: () => <TabIcon emoji="📈" /> }} />
-      <Tab.Screen name="MoreTab" component={MoreStack} options={{ title: 'Plus', tabBarIcon: () => <TabIcon emoji="☰" /> }} />
+      <Tab.Screen name="DashboardTab" component={DashboardStack} options={{ title: 'Athlètes', tabBarIcon: ({ color }) => <TabIcon name="users" color={color} /> }} />
+      <Tab.Screen name="ExercisesTab" component={ExerciseBankStack} options={{ title: 'Exercices', tabBarIcon: ({ color }) => <TabIcon name="exercise" color={color} /> }} />
+      <Tab.Screen name="FoodsTab" component={FoodBankStack} options={{ title: 'Aliments', tabBarIcon: ({ color }) => <TabIcon name="food" color={color} /> }} />
+      <Tab.Screen name="BilanTab" component={BilanStack} options={{ title: 'Easy Bilan', tabBarIcon: ({ color }) => <TabIcon name="trend-up" color={color} /> }} />
+      <Tab.Screen name="MoreTab" component={MoreStack} options={{ title: 'Plus', tabBarIcon: ({ color }) => <TabIcon name="menu" color={color} /> }} />
     </Tab.Navigator>
   );
 }

@@ -9,6 +9,13 @@ export async function loginRequest(username: string, password: string) {
   return data;
 }
 
+export async function registerRequest(payload: {
+  username: string; password: string; display_name?: string;
+}) {
+  const { data } = await apiClient.post<{ token: string; user: UserDTO }>('/auth/register', payload);
+  return data;
+}
+
 export async function meRequest() {
   const { data } = await apiClient.get<UserDTO>('/auth/me');
   return data;
